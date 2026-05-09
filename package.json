@@ -1,0 +1,25 @@
+{
+  "name": "edge_ai",
+  "version": "1.0.0",
+  "description": "Real-time 3D avatar that mirrors your movements using your webcam.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "terser": "^5.44.1",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "@gltf-transform/cli": "^4.3.0",
+    "gltf-pipeline": "^4.3.0"
+  }
+}
