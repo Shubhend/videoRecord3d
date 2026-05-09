@@ -3,6 +3,9 @@ import { resolve } from 'path';
 
 export default defineConfig({
   base: '/edge_ai/',
+   server: {
+    allowedHosts: ['video.lovetoreads.com']
+  },
   build: {
     outDir: 'dist',
     minify: 'terser',
