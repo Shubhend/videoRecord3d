@@ -305,6 +305,62 @@
       .scene-ground-row input { margin-top: 3px; flex-shrink: 0; cursor: pointer; }
       .scene-ground-row strong { display: block; margin-bottom: 2px; }
 
+      .model-surface-color-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+        padding: 12px 14px;
+        background: rgba(22, 28, 48, 0.45);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      .model-surface-color-row label { font-weight: 600; min-width: 88px; }
+      .model-surface-color-row input[type="color"] {
+        width: 56px;
+        height: 36px;
+        padding: 2px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .model-surface-swatch {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--border-strong);
+        margin-left: auto;
+      }
+
+      .placement-modes {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .placement-option { cursor: pointer; }
+      .placement-option input { position: absolute; opacity: 0; pointer-events: none; }
+      .placement-option-card {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(22, 28, 48, 0.45);
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .placement-option input:checked + .placement-option-card {
+        border-color: var(--accent);
+        background: rgba(0, 255, 136, 0.08);
+        box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.18);
+      }
+      .placement-option-card:hover { border-color: rgba(0, 255, 136, 0.35); }
+      .placement-option-label { font-weight: 700; font-size: 13px; }
+      .placement-option-hint { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+
       @media (max-width: 640px) {
         .bg-modes { grid-template-columns: 1fr; }
         main { padding: 24px 16px 60px; }
@@ -322,6 +378,7 @@
       </a>
       <div class="nav-actions">
         <a href="models.html" class="btn">Models</a>
+        <a href="cameras.html" class="btn">Camera Views</a>
         <a href="index.html" class="btn">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M9 2.5l-4.5 4.5L9 11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -391,6 +448,80 @@
       <section class="panel">
         <div class="panel-header">
           <div>
+            <div class="panel-title">Recording camera</div>
+            <div class="panel-desc">
+              Save camera angles on the
+              <a href="cameras.html" style="color:var(--accent);">Camera Views</a> page (frame the face with the mouse).
+              During recording or audio playback, the app switches between your saved views at random.
+            </div>
+          </div>
+        </div>
+        <label for="cam-change-mode" style="display:block;margin:12px 0 6px;font-size:12px;font-weight:600;">Angle change during recording</label>
+        <select id="cam-change-mode" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-strong);background:rgba(22,28,48,0.8);color:var(--text);font-family:inherit;font-size:13px;margin-bottom:12px;">
+          <option value="random">Random — switch between saved views</option>
+          <option value="hold">Hold — one random view, no cuts</option>
+        </select>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-enabled" checked />
+          <span>
+            <strong>Use saved camera views</strong>
+            <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">When off, you keep manual mouse control during record/audio.</span>
+          </span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-auto-audio" checked />
+          <span><strong>During audio playback &amp; Play &amp; Record</strong></span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-auto-record" checked />
+          <span><strong>While canvas recording (no audio)</strong></span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-auto-live" />
+          <span><strong>Always on live page</strong><span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">Slower, subtle moves when idle.</span></span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-speech-cuts" checked />
+          <span><strong>Cut on speech pauses</strong><span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">New angle after a brief silence (paragraph feel).</span></span>
+        </label>
+        <p style="margin-top:12px;"><a href="cameras.html" class="btn" style="display:inline-flex;">Open Camera Views →</a></p>
+        <div id="rows-camera"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Character position</div>
+            <div class="panel-desc">Place the avatar on the floor. North is toward the back of the scene; south is toward the camera; east is to the right.</div>
+          </div>
+        </div>
+        <div class="placement-modes" id="placement-modes" role="radiogroup" aria-label="Character placement"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Avatar surface</div>
+            <div class="panel-desc">Tint the 3D model. The color multiplies with each part’s original shading so textures stay visible.</div>
+          </div>
+        </div>
+        <label class="scene-ground-row">
+          <input type="checkbox" id="model-surface-enabled" />
+          <span>
+            <strong>Custom surface color</strong>
+            <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">When off, the model uses its original colors from the file.</span>
+          </span>
+        </label>
+        <div class="model-surface-color-row">
+          <label for="model-surface-color">Surface color</label>
+          <input type="color" id="model-surface-color" value="#e8c4a8" />
+          <span class="model-surface-swatch" id="model-surface-swatch" aria-hidden="true"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
             <div class="panel-title">Background</div>
             <div class="panel-desc">Choose a backdrop for the live scene. Image &amp; color hide the procedural stars and moon.</div>
           </div>
@@ -435,6 +566,11 @@
             <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">Turn off to hide the floor plane, grid lines, and shadow-catching ground on the live page.</span>
           </span>
         </label>
+        <div class="model-surface-color-row" style="margin-top:12px;">
+          <label for="floor-color">Floor color</label>
+          <input type="color" id="floor-color" value="#555555" />
+          <span class="model-surface-swatch" id="floor-color-swatch" aria-hidden="true"></span>
+        </div>
       </section>
 
       <div class="actions">

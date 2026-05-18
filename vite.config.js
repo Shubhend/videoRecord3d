@@ -29,6 +29,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         models: resolve(__dirname, 'models.html'),
         settings: resolve(__dirname, 'settings.html'),
+        cameras: resolve(__dirname, 'cameras.html'),
       },
       output: {
         entryFileNames: 'assets/app.[hash].js',

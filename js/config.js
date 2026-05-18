@@ -59,8 +59,8 @@ export const Config = {
   scene: {
     backgroundColor: 0x000000,
     floorColor: 0x555555,
-    floorSize: 20,
-    gridDivisions: 40
+    floorSize: 1,
+    gridDivisions: 10
   },
   
   // Lighting settings

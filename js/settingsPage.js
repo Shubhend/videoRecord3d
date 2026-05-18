@@ -3,6 +3,7 @@
 // to the shared settings store.
 
 import { getSettings, setSettings, resetSettings } from './settingsStore.js';
+import { AVATAR_PLACEMENTS } from './avatarPlacement.js';
 import {
   getBackgroundConfig,
   setBackgroundConfig,
@@ -54,6 +55,37 @@ const ROWS = {
       key: 'autoRelax',
       label: 'Smooth Return to Rest',
       hint: 'When tracking is briefly lost (face turns away, hand off-screen), drift those body parts back to a neutral pose instead of freezing in the last detected position. Sensitivity controls how quickly bones return — higher = snaps back fast, lower = lingers longer.',
+    },
+  ],
+  camera: [
+    {
+      key: 'smoothness',
+      label: 'Transition smoothness',
+      hint: 'How smoothly the camera moves between your saved views.',
+      max: 0.18,
+      min: 0.02,
+      step: 0.01,
+      format: (v) => `${Math.round(v * 100)}%`,
+    },
+    {
+      key: 'shotMinSec',
+      label: 'Min seconds per shot',
+      hint: 'Shortest time before a random angle change (audio / record).',
+      max: 12,
+      min: 1.5,
+      step: 0.5,
+      format: (v) => `${v.toFixed(1)}s`,
+      path: 'camera',
+    },
+    {
+      key: 'shotMaxSec',
+      label: 'Max seconds per shot',
+      hint: 'Longest time before a random angle change.',
+      max: 20,
+      min: 3,
+      step: 0.5,
+      format: (v) => `${v.toFixed(1)}s`,
+      path: 'camera',
     },
   ],
 };
@@ -112,6 +144,105 @@ function renderInto(containerId, defs, settings) {
   defs.forEach((def) => container.appendChild(buildRow(def, settings)));
 }
 
+function buildCameraRow(def, settings) {
+  const cam = settings.camera || {};
+  const val = Number(cam[def.key] ?? def.min ?? 1);
+  const min = Number(def.min ?? 0);
+  const max = Number(def.max ?? 2);
+  const step = def.step ?? 0.05;
+  const fmt = def.format || pct;
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <div class="row-label">
+      <div>
+        <span class="label-text">${def.label}</span>
+        <span class="label-hint">${def.hint}</span>
+      </div>
+    </div>
+    <input
+      type="range" min="${min}" max="${max}" step="${step}"
+      class="slider"
+      data-cam-slider="${def.key}"
+      value="${val}"
+    />
+    <div class="row-value" data-cam-value="${def.key}">${fmt(val)}</div>
+  `;
+  return row;
+}
+
+function renderCameraPanel() {
+  const settings = getSettings();
+  const cam = settings.camera || {};
+  const container = document.getElementById('rows-camera');
+  if (!container) return;
+  container.innerHTML = '';
+  ROWS.camera.forEach((def) => container.appendChild(buildCameraRow(def, settings)));
+
+  const map = [
+    ['cam-enabled', 'enabled'],
+    ['cam-auto-audio', 'autoOnAudio'],
+    ['cam-auto-record', 'autoOnRecord'],
+    ['cam-auto-live', 'autoOnLive'],
+    ['cam-speech-cuts', 'useSpeechCuts'],
+  ];
+  map.forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.checked = cam[key] !== false;
+  });
+
+  const changeMode = document.getElementById('cam-change-mode');
+  if (changeMode) {
+    changeMode.value = cam.changeMode === 'hold' ? 'hold' : 'random';
+  }
+
+  container.querySelectorAll('input[data-cam-slider]').forEach((input) => {
+    const key = input.dataset.camSlider;
+    const def = ROWS.camera.find((d) => d.key === key);
+    const fmt = def?.format || pct;
+    const valueEl = container.querySelector(`[data-cam-value="${key}"]`);
+
+    input.addEventListener('input', () => {
+      const v = Number(input.value);
+      if (valueEl) valueEl.textContent = fmt(v);
+    });
+    input.addEventListener('change', () => {
+      setSettings({ camera: { [key]: Number(input.value) } });
+    });
+  });
+}
+
+function bindCameraChangeMode() {
+  const el = document.getElementById('cam-change-mode');
+  if (!el) return;
+  el.addEventListener('change', () => {
+    setSettings({ camera: { changeMode: el.value } });
+    showToast(
+      el.value === 'hold' ? 'Camera: hold one angle' : 'Camera: random cuts'
+    );
+  });
+}
+
+function bindCameraCheckboxes() {
+  const map = [
+    ['cam-enabled', 'enabled'],
+    ['cam-auto-audio', 'autoOnAudio'],
+    ['cam-auto-record', 'autoOnRecord'],
+    ['cam-auto-live', 'autoOnLive'],
+    ['cam-speech-cuts', 'useSpeechCuts'],
+  ];
+  map.forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      setSettings({ camera: { [key]: el.checked } });
+      showToast(`${key}: ${el.checked ? 'on' : 'off'}`);
+    });
+  });
+}
+
 function render() {
   const settings = getSettings();
   renderInto('rows-face', ROWS.face, settings);
@@ -119,6 +250,7 @@ function render() {
   renderInto('rows-hands', ROWS.hands, settings);
   renderInto('rows-presence', ROWS.presence, settings);
   renderInto('rows-smoothing', ROWS.smoothing, settings);
+  renderCameraPanel();
   bindRowEvents();
 }
 
@@ -175,6 +307,10 @@ document.getElementById('reset').addEventListener('click', () => {
   render();
   renderBackgroundPanel();
   syncShowGround();
+  syncModelSurface();
+  syncFloorColor();
+  renderPlacementPanel();
+  renderCameraPanel();
   showToast('Settings reset to defaults');
 });
 
@@ -283,6 +419,14 @@ bgClearBtn.addEventListener('click', async () => {
 render();
 renderBackgroundPanel();
 syncShowGround();
+syncModelSurface();
+syncFloorColor();
+renderPlacementPanel();
+bindPlacementPanel();
+bindModelSurface();
+bindFloorColor();
+bindCameraCheckboxes();
+bindCameraChangeMode();
 
 // ---------- Ground visibility (live scene) ----------
 
@@ -298,5 +442,112 @@ if (showGroundInput) {
   showGroundInput.addEventListener('change', () => {
     setSettings({ scene: { showGround: showGroundInput.checked } });
     showToast(showGroundInput.checked ? 'Ground will show on live page' : 'Ground hidden on live page');
+  });
+}
+
+// ---------- Character placement ----------
+
+const placementModesEl = document.getElementById('placement-modes');
+
+function renderPlacementPanel() {
+  if (!placementModesEl) return;
+  const current = getSettings().scene?.avatarPlacement || 'east';
+  placementModesEl.innerHTML = AVATAR_PLACEMENTS.map(
+    (p) => `
+    <label class="placement-option">
+      <input type="radio" name="avatar-placement" value="${p.id}" ${p.id === current ? 'checked' : ''} />
+      <span class="placement-option-card">
+        <span class="placement-option-label">${p.label}</span>
+        <span class="placement-option-hint">${p.hint}</span>
+      </span>
+    </label>
+  `
+  ).join('');
+}
+
+function bindPlacementPanel() {
+  if (!placementModesEl) return;
+  placementModesEl.addEventListener('change', (e) => {
+    const input = e.target;
+    if (input.name !== 'avatar-placement' || !input.checked) return;
+    setSettings({ scene: { avatarPlacement: input.value } });
+    const label = AVATAR_PLACEMENTS.find((p) => p.id === input.value)?.label || input.value;
+    showToast(`Character position: ${label}`);
+  });
+}
+
+// ---------- Scene appearance (floor + avatar surface) ----------
+
+const modelSurfaceEnabled = document.getElementById('model-surface-enabled');
+const modelSurfaceColor = document.getElementById('model-surface-color');
+const modelSurfaceSwatch = document.getElementById('model-surface-swatch');
+const floorColorInput = document.getElementById('floor-color');
+const floorColorSwatch = document.getElementById('floor-color-swatch');
+
+function readModelSurfaceUi() {
+  return {
+    enabled: modelSurfaceEnabled?.checked === true,
+    color: modelSurfaceColor?.value || '#e8c4a8',
+  };
+}
+
+function saveModelSurface(patch = {}) {
+  const current = getSettings().scene?.modelSurface || {};
+  setSettings({
+    scene: {
+      modelSurface: { ...current, ...patch },
+    },
+  });
+}
+
+function syncModelSurface() {
+  const cfg = getSettings().scene?.modelSurface || {};
+  if (modelSurfaceEnabled) {
+    modelSurfaceEnabled.checked = cfg.enabled === true;
+  }
+  const hex = cfg.color || '#e8c4a8';
+  if (modelSurfaceColor) modelSurfaceColor.value = hex;
+  if (modelSurfaceSwatch) modelSurfaceSwatch.style.background = hex;
+}
+
+function syncFloorColor() {
+  const hex = getSettings().scene?.floorColor || '#555555';
+  if (floorColorInput) floorColorInput.value = hex;
+  if (floorColorSwatch) floorColorSwatch.style.background = hex;
+}
+
+function bindModelSurface() {
+  if (!modelSurfaceEnabled || !modelSurfaceColor) return;
+
+  modelSurfaceEnabled.addEventListener('change', () => {
+    saveModelSurface(readModelSurfaceUi());
+    showToast(
+      modelSurfaceEnabled.checked ? 'Avatar surface color on' : 'Avatar using original colors'
+    );
+  });
+
+  modelSurfaceColor.addEventListener('input', () => {
+    const hex = modelSurfaceColor.value;
+    if (modelSurfaceSwatch) modelSurfaceSwatch.style.background = hex;
+    saveModelSurface({ enabled: true, color: hex });
+    if (modelSurfaceEnabled) modelSurfaceEnabled.checked = true;
+  });
+
+  modelSurfaceColor.addEventListener('change', () => {
+    showToast('Avatar surface color saved');
+  });
+}
+
+function bindFloorColor() {
+  if (!floorColorInput) return;
+
+  floorColorInput.addEventListener('input', () => {
+    const hex = floorColorInput.value;
+    if (floorColorSwatch) floorColorSwatch.style.background = hex;
+    setSettings({ scene: { floorColor: hex } });
+  });
+
+  floorColorInput.addEventListener('change', () => {
+    showToast('Floor color saved');
   });
 }

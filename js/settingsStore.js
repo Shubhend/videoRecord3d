@@ -58,6 +58,31 @@ export const DEFAULT_SETTINGS = Object.freeze({
   scene: {
     /** When false, hides the floor mesh, grid, and shadow-receiver plane. */
     showGround: true,
+    /** Floor plane color (MeshStandardMaterial on the ground). */
+    floorColor: '#555555',
+    /** Optional tint multiplied with each mesh material color (textures preserved). */
+    modelSurface: {
+      enabled: false,
+      color: '#e8c4a8',
+    },
+    /** center | north | south | east | southEast */
+    avatarPlacement: 'east',
+  },
+  // Saved camera views — random cuts during record / audio (see cameras.html).
+  camera: {
+    enabled: true,
+    autoOnAudio: true,
+    autoOnRecord: true,
+    autoOnLive: false,
+    /** 'random' = switch between saved views; 'hold' = one random view for the whole session. */
+    changeMode: 'random',
+    /** 0.03 = very smooth/slow, 0.2 = snappier. */
+    smoothness: 0.06,
+    shotMinSec: 4,
+    shotMaxSec: 9,
+    useSpeechCuts: true,
+    silenceGapSec: 0.5,
+    speechThreshold: 0.028,
   },
 });
 
@@ -97,7 +122,7 @@ export function getSettings() {
 }
 
 export function setSettings(partial) {
-  const next = deepMerge(getSettings(), partial);
+  const next = deepMerge(clone(getSettings()), partial);
   _cached = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(next));

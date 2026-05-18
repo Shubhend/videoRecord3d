@@ -222,7 +222,8 @@ export class SceneSetup {
   }
   
   createShadowGround() {
-    const groundGeometry = new THREE.PlaneGeometry(12, 12);
+    const shadowSize = Config.scene.floorSize * 0.9;
+    const groundGeometry = new THREE.PlaneGeometry(shadowSize, shadowSize);
     const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.5 });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
@@ -242,6 +243,16 @@ export class SceneSetup {
     if (this.gridHelper) this.gridHelper.visible = v;
     if (this.shadowGroundMesh) this.shadowGroundMesh.visible = v;
   }
+
+  /**
+   * @param {string} hex — e.g. '#555555'
+   */
+  setFloorColor(hex) {
+    const mat = this.floorMesh?.material;
+    if (!mat?.color) return;
+    mat.color.set(hex || '#555555');
+    mat.needsUpdate = true;
+  }
   
   onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -250,7 +261,7 @@ export class SceneSetup {
   }
   
   render() {
-    if (this.controls) {
+    if (this.controls?.enabled) {
       this.controls.update();
     }
     this.renderer.render(this.scene, this.camera);

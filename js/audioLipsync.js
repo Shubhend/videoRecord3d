@@ -182,6 +182,20 @@ export class AudioLipsync {
     return this._isPlaying;
   }
 
+  /**
+   * RMS loudness 0..~0.35 for cinematic camera paragraph detection.
+   */
+  getSpeechLevel() {
+    if (!this.analyser || !this._timeData || !this._isPlaying) return 0;
+    this.analyser.getFloatTimeDomainData(this._timeData);
+    let sumSq = 0;
+    for (let i = 0; i < this._timeData.length; i++) {
+      const v = this._timeData[i];
+      sumSq += v * v;
+    }
+    return Math.sqrt(sumSq / this._timeData.length);
+  }
+
   /** Returns a MediaStream of the audio (for muxing into a recorder). */
   getStream() {
     return this.streamDestination?.stream || null;
