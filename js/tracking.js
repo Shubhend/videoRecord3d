@@ -16,6 +16,7 @@ const LM = {
   leftAnkle: 27, rightAnkle: 28,
 };
 
+
 // MediaPipe Face Mesh landmark indices used for our custom expression cues.
 // Reference: https://github.com/google/mediapipe/blob/master/mediapipe/modules/face_geometry/data/canonical_face_model_uv_visualization.png
 const FM = {
