@@ -21,6 +21,10 @@ import { getSettings, onSettingsChange } from './settingsStore.js';
 import { loadBackground, onBackgroundChange } from './backgroundStore.js';
 import { CanvasRecorder, formatDuration } from './recorder.js';
 import { AudioLipsync } from './audioLipsync.js';
+import { CinematicCamera } from './cinematicCamera.js';
+import { capturePoseFromScene, saveCamera } from './cameraStore.js';
+import { getAvatarAnchor } from './cameraPoseMath.js';
+import { applyFullAppearance } from './sceneAppearance.js';
 
 export class AvatarApp {
   constructor() {
@@ -48,6 +52,7 @@ export class AvatarApp {
     // Recording / audio lipsync state
     this.recorder = null;
     this.audioLipsync = null;
+    this.cinematicCamera = null;
     this._lipsyncFile = null;     // user-chosen audio File for lipsync
     this._isRecordingForExport = false; // true when recording was started by "Play & Record"
 
@@ -81,6 +86,8 @@ export class AvatarApp {
     this._distanceTargetZ = 0;        // computed each frame from ratio
     this._distanceCurrentZ = 0;       // smoothed value applied to the avatar
     this._maxDistanceZ = 2.5;         // meters of forward travel at full proximity
+    this._warnedNoCameras = false;
+    this._relockCameraOnRecordStart = false;
 
     this.setupInteraction();
   }
@@ -96,6 +103,10 @@ export class AvatarApp {
       this.updateLoading('Setting up 3D scene...');
       this.sceneSetup = new SceneSetup(this.canvas);
       this.sceneSetup.init();
+      this.cinematicCamera = new CinematicCamera(this.sceneSetup, () =>
+        getAvatarAnchor(this.vrmLoader?.vrm)
+      );
+      await this.cinematicCamera.refreshShots();
 
       // Apply user's saved background (color/image), default if none.
       try {
@@ -104,7 +115,7 @@ export class AvatarApp {
       } catch (e) {
         console.warn('Could not apply saved background:', e);
       }
-      this.sceneSetup.setGroundVisible(getSettings().scene?.showGround !== false);
+      this._applyAppearanceAndPlacement(getSettings());
       // Live-react to background changes from the settings tab.
       this._unsubBackground = onBackgroundChange(async () => {
         try {
@@ -155,6 +166,7 @@ export class AvatarApp {
           e.stopPropagation();
           this.isBirdView = !this.isBirdView;
           birdBtn.classList.toggle('active', this.isBirdView);
+          if (this.isBirdView) this.cinematicCamera?.releaseControls();
           if (this.sceneSetup && this.sceneSetup.controls) {
             this.sceneSetup.controls.enabled = !this.isBirdView;
             if (!this.isBirdView) {
@@ -166,6 +178,7 @@ export class AvatarApp {
 
       // Model selector
       this.setupModelSelector();
+      this.setupSaveCameraButton();
 
       // Recording + audio lipsync controls
       this.setupRecording();
@@ -195,19 +208,16 @@ export class AvatarApp {
       this.vrmLoader = new VRMLoader(this.sceneSetup.scene, (msg) => this.updateLoading(msg));
       const vrm = await this.vrmLoader.load(source);
       vrm.scene.scale.set(1.3, 1.3, 1.3);
-      // Sync the distance-tracking base position to where the VRM actually spawned
-      this.avatarBasePosition.copy(vrm.scene.position);
 
       this.avatarRig = new AvatarRig();
       this.avatarRig.setSettings(getSettings());
       this.avatarRig.setVRM(vrm);
+      this._applyAppearanceAndPlacement(getSettings());
 
       // Live-apply sensitivity changes from the Settings page (other tabs too).
       this._unsubSettings = onSettingsChange((s) => {
         this.avatarRig.setSettings(s);
-        if (this.sceneSetup) {
-          this.sceneSetup.setGroundVisible(s.scene?.showGround !== false);
-        }
+        this._applyAppearanceAndPlacement(s);
       });
 
       this.updateLoading('Initializing tracking...');
@@ -232,8 +242,18 @@ export class AvatarApp {
 
   // ---------- Model selector / live swap ----------
 
+  setupSaveCameraButton() {
+    const btn = document.getElementById('save-cam-btn');
+    if (!btn) return;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await this.saveCurrentCameraView();
+    });
+  }
+
   setupModelSelector() {
     if (!this.modelChip || !this.modelMenu) return;
+    this.modelChipWrap = document.querySelector('.model-chip-wrap');
 
     this.modelChip.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -246,7 +266,8 @@ export class AvatarApp {
     });
 
     document.addEventListener('click', (e) => {
-      if (!this.modelMenu.contains(e.target) && !this.modelChip.contains(e.target)) {
+      const wrap = this.modelChipWrap || this.modelChip;
+      if (!this.modelMenu.contains(e.target) && !wrap.contains(e.target)) {
         this.closeModelMenu();
       }
     });
@@ -295,6 +316,20 @@ export class AvatarApp {
         </svg>
         Manage Models
       </a>
+      <a class="model-menu-link" href="cameras.html">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M2 4h10v7H2z" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="7" cy="7.5" r="2" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+        Camera Views
+      </a>
+      <button type="button" class="model-menu-link" id="menu-save-cam">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M2 4h3l1-1h2l1 1h3v7H2V4z" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="7" cy="7.5" r="1.5" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Save current camera
+      </button>
       <a class="model-menu-link" href="settings.html">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <circle cx="7" cy="7" r="2" stroke="currentColor" stroke-width="1.4"/>
@@ -316,6 +351,15 @@ export class AvatarApp {
         await this.swapAvatar(id);
       });
     });
+
+    const saveCamBtn = document.getElementById('menu-save-cam');
+    if (saveCamBtn) {
+      saveCamBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        this.closeModelMenu();
+        await this.saveCurrentCameraView();
+      });
+    }
   }
 
   async swapAvatar(modelId) {
@@ -335,6 +379,7 @@ export class AvatarApp {
       vrm.scene.scale.set(1.3, 1.3, 1.3);
       this.avatarBasePosition.copy(vrm.scene.position);
       this.avatarRig.setVRM(vrm);
+      this._applyAppearanceAndPlacement(getSettings());
 
       // Dispose old only after success.
       if (previousLoader) previousLoader.dispose();
@@ -428,6 +473,15 @@ export class AvatarApp {
         '[Lipsync] withLipsyncAudio=true but no audio stream available',
         { hasAudioLipsync: !!this.audioLipsync }
       );
+    }
+
+    await this.cinematicCamera?.refreshShots();
+
+    // Frame 0 of the recording = character position + camera framing right now.
+    if (this.cinematicCamera?.active) {
+      this.cinematicCamera.relockSessionAnchor();
+    } else {
+      this._relockCameraOnRecordStart = true;
     }
 
     try {
@@ -587,6 +641,7 @@ export class AvatarApp {
 
     this.audioLipsync = new AudioLipsync();
     await this.audioLipsync.load(this._lipsyncFile);
+    await this.cinematicCamera?.refreshShots();
 
     // Apply the user's current intensity setting + react to changes live.
     this._applyAudioLipsyncIntensity();
@@ -769,6 +824,67 @@ export class AvatarApp {
     if (this.statusElement) this.statusElement.textContent = `Tracking: ${text}`;
   }
 
+  _applyAppearanceAndPlacement(settings) {
+    const vrm = this.vrmLoader?.vrm;
+    const placement = applyFullAppearance(this.sceneSetup, vrm, settings);
+    if (vrm) {
+      const p = placement || vrm.scene.position;
+      this.avatarBasePosition.set(p.x, 0, p.z);
+    }
+  }
+
+  async saveCurrentCameraView() {
+    const name = prompt('Name this camera view (e.g. Face close-up)');
+    if (!name?.trim()) return;
+    try {
+      const pose = capturePoseFromScene(this.sceneSetup, this.vrmLoader?.vrm);
+      await saveCamera(name.trim(), pose);
+      await this.cinematicCamera?.refreshShots();
+      this.showToast(`Camera saved (follows avatar): ${name.trim()}`);
+    } catch (e) {
+      this.showToast(e.message || 'Could not save camera', true);
+    }
+  }
+
+  _updateCinematicCamera(delta) {
+    if (!this.cinematicCamera || this.isBirdView) {
+      this.cinematicCamera?.releaseControls();
+      return;
+    }
+
+    const ctx = {
+      audioPlaying: !!this.audioLipsync?.isPlaying(),
+      recording: !!(this.recorder?.isRecording()),
+    };
+
+    if (!this.cinematicCamera.shouldRun(ctx)) {
+      this.cinematicCamera.stop();
+      return;
+    }
+
+    if (!this.cinematicCamera.active) {
+      const forceRelock = this._relockCameraOnRecordStart;
+      this._relockCameraOnRecordStart = false;
+      if (!this.cinematicCamera.start()) {
+        if (!this._warnedNoCameras) {
+          this._warnedNoCameras = true;
+          this.showToast(
+            'No saved camera views — open Camera Views to capture angles first',
+            true
+          );
+        }
+        return;
+      }
+      if (forceRelock && ctx.recording) {
+        this.cinematicCamera.relockSessionAnchor();
+      }
+    }
+
+    const speech = this.audioLipsync?.getSpeechLevel?.() ?? 0;
+    const liveIdle = !ctx.audioPlaying && !ctx.recording;
+    this.cinematicCamera.update(delta, speech, liveIdle);
+  }
+
   animate() {
     requestAnimationFrame(() => this.animate());
 
@@ -780,24 +896,31 @@ export class AvatarApp {
       this.avatarRig.setMouthOverride(w);
     }
 
-    this.sceneSetup.render();
-
     if (this.avatarRig) this.avatarRig.update(delta);
 
     // Distance / proximity tracking — move avatar toward or away from camera
     // based on user proximity to the webcam.
     this._applyDistanceTracking();
 
-    if (this.sceneObjects) this.sceneObjects.updateWeather();
+    this._updateCinematicCamera(delta);
 
-    if (this.rabbit && this.vrmLoader && this.vrmLoader.vrm) {
-      this.rabbit.setAvatarTarget(this.vrmLoader.vrm.scene.position);
-      this.rabbit.update(delta);
-    } else if (this.rabbit) {
-      this.rabbit.update(delta);
+    this.sceneSetup.render();
+
+    const isRec = !!(this.recorder?.isRecording());
+    const cinematicOn = !!this.cinematicCamera?.active;
+
+    if (this.sceneObjects && !isRec) this.sceneObjects.updateWeather();
+
+    if (!isRec && !cinematicOn) {
+      if (this.rabbit && this.vrmLoader && this.vrmLoader.vrm) {
+        this.rabbit.setAvatarTarget(this.vrmLoader.vrm.scene.position);
+        this.rabbit.update(delta);
+      } else if (this.rabbit) {
+        this.rabbit.update(delta);
+      }
     }
 
-    if (this.parrots) {
+    if (this.parrots && !isRec && !cinematicOn) {
       this.parrots.forEach((p) => p.update(delta));
 
       if (this.isBirdView && this.parrots.length > 0) {
@@ -828,7 +951,7 @@ export class AvatarApp {
     if (!this.sceneSetup) return;
 
     // Ignore drags that started on UI controls
-    if (event.target && event.target.closest && event.target.closest('.topbar, #status, #debug-video, .toast, #loading, #rec-indicator, #audio-panel')) {
+    if (event.target && event.target.closest && event.target.closest('.topbar, #status, #debug-video, .toast, #loading, #rec-indicator, #audio-panel, #save-cam-btn')) {
       return;
     }
 

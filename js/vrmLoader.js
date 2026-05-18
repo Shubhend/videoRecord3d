@@ -33,8 +33,8 @@ export class VRMLoader {
             // Face camera
             vrm.scene.rotation.y = Math.PI;
 
-            // Position on floor, slightly to the right
-            vrm.scene.position.set(1.0, 0, 0);
+            // Placement applied from settings after load (see avatarPlacement.js)
+            vrm.scene.position.set(0, 0, 0);
 
             // Enable shadows and Fix Materials (Polyfill)
             vrm.scene.traverse((obj) => {
