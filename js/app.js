@@ -3,7 +3,6 @@
 
 import { Config } from './config.js';
 import { SceneSetup } from './sceneSetup.js';
-import { SceneObjects } from './sceneObjects.js';
 import { VRMLoader } from './vrmLoader.js';
 import { AvatarRig } from './avatarRig.js';
 import { Tracking } from './tracking.js';
@@ -29,7 +28,6 @@ import { applyFullAppearance } from './sceneAppearance.js';
 export class AvatarApp {
   constructor() {
     this.sceneSetup = null;
-    this.sceneObjects = null;
     this.audioManager = null;
     this.vrmLoader = null;
     this.avatarRig = null;
@@ -129,8 +127,6 @@ export class AvatarApp {
       this.audioManager = new AudioManager();
       this.audioManager.init(this.sceneSetup.camera);
 
-      this.sceneObjects = new SceneObjects(this.sceneSetup.scene, this.audioManager);
-
       // Rabbit
       this.rabbit = new Rabbit();
       this.sceneSetup.scene.add(this.rabbit);
@@ -193,9 +189,6 @@ export class AvatarApp {
       window.addEventListener('pointerdown', unlockAudio);
       window.addEventListener('keydown', unlockAudio);
 
-      this.updateLoading('Loading environment...');
-      await this.createEnvironmentObjects();
-
       this.updateLoading('Accessing camera...');
       await this.setupCamera();
 
@@ -217,6 +210,7 @@ export class AvatarApp {
       // Live-apply sensitivity changes from the Settings page (other tabs too).
       this._unsubSettings = onSettingsChange((s) => {
         this.avatarRig.setSettings(s);
+        this.tracking?.setSettings(s);
         this._applyAppearanceAndPlacement(s);
       });
 
@@ -227,6 +221,7 @@ export class AvatarApp {
         (status) => this.updateStatus(status),
         (ratio) => { this._distanceRatio = ratio; }
       );
+      this.tracking.setSettings(getSettings());
       await this.tracking.init();
 
       this.updateLoading('Starting...');
@@ -787,26 +782,14 @@ export class AvatarApp {
     }, 2400);
   }
 
-  // ---------- Environment / camera ----------
-
-  async createEnvironmentObjects() {
-    this.envGroup = new THREE.Group();
-    this.envGroup.position.set(-4, 0, -4);
-    this.sceneSetup.scene.add(this.envGroup);
-
-    try {
-     
-
-      const houseBounds = new THREE.Box3().setFromObject();
-      const weatherGroup = this.sceneObjects.createWeather(houseBounds);
-      this.envGroup.add(weatherGroup);
-    } catch (e) {
-      console.error('Could not load house model:', e);
-    }
-  }
-
   async setupCamera() {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: Config.camera });
+    const tm = getSettings().trackingMedia || {};
+    const videoConstraints = {
+      ...Config.camera,
+      width: tm.cameraWidth ?? Config.camera.width,
+      height: tm.cameraHeight ?? Config.camera.height,
+    };
+    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
     this.video.srcObject = stream;
     this.debugVideo.srcObject = stream;
     await new Promise((r) => (this.video.onloadedmetadata = r));
@@ -909,8 +892,6 @@ export class AvatarApp {
     const isRec = !!(this.recorder?.isRecording());
     const cinematicOn = !!this.cinematicCamera?.active;
 
-    if (this.sceneObjects && !isRec) this.sceneObjects.updateWeather();
-
     if (!isRec && !cinematicOn) {
       if (this.rabbit && this.vrmLoader && this.vrmLoader.vrm) {
         this.rabbit.setAvatarTarget(this.vrmLoader.vrm.scene.position);
@@ -969,15 +950,6 @@ export class AvatarApp {
         }
       });
     }
-    if (this.envGroup) {
-      this.envGroup.traverse((o) => {
-        if (o.isMesh) {
-          meshes.push(o);
-          meshToRoot.set(o, this.envGroup);
-        }
-      });
-    }
-
     const intersects = this.raycaster.intersectObjects(meshes);
 
     if (intersects.length > 0) {

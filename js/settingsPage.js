@@ -2,7 +2,13 @@
 // Builds the per-part sensitivity / toggle UI and writes changes
 // to the shared settings store.
 
-import { getSettings, setSettings, resetSettings } from './settingsStore.js';
+import {
+  getSettings,
+  setSettings,
+  resetSettings,
+  patchTrackingMedia,
+  onSettingsChange,
+} from './settingsStore.js';
 import { AVATAR_PLACEMENTS } from './avatarPlacement.js';
 import {
   getBackgroundConfig,
@@ -309,6 +315,7 @@ document.getElementById('reset').addEventListener('click', () => {
   syncShowGround();
   syncModelSurface();
   syncFloorColor();
+  syncTrackingMedia();
   renderPlacementPanel();
   renderCameraPanel();
   showToast('Settings reset to defaults');
@@ -416,17 +423,103 @@ bgClearBtn.addEventListener('click', async () => {
   }
 });
 
-render();
-renderBackgroundPanel();
-syncShowGround();
-syncModelSurface();
-syncFloorColor();
-renderPlacementPanel();
-bindPlacementPanel();
-bindModelSurface();
-bindFloorColor();
-bindCameraCheckboxes();
-bindCameraChangeMode();
+// ---------- Tracking stability (MediaPipe) ----------
+
+const tmModel = document.getElementById('tm-model-complexity');
+const tmCameraRes = document.getElementById('tm-camera-res');
+const tmPoseStab = document.getElementById('tm-pose-stab');
+const tmPoseStabVal = document.getElementById('tm-pose-stab-val');
+const tmHandStab = document.getElementById('tm-hand-stab');
+const tmHandStabVal = document.getElementById('tm-hand-stab-val');
+const tmFaceStab = document.getElementById('tm-face-stab');
+const tmFaceStabVal = document.getElementById('tm-face-stab-val');
+const tmHoldMs = document.getElementById('tm-hold-ms');
+const tmHoldMsVal = document.getElementById('tm-hold-ms-val');
+const tmDetConf = document.getElementById('tm-det-conf');
+const tmDetConfVal = document.getElementById('tm-det-conf-val');
+const tmTrkConf = document.getElementById('tm-trk-conf');
+const tmTrkConfVal = document.getElementById('tm-trk-conf-val');
+
+function stabPct(v) {
+  return `${Math.round(Number(v) * 100)}%`;
+}
+
+function syncTrackingMedia() {
+  const tm = getSettings().trackingMedia || {};
+  if (tmModel) tmModel.value = String(tm.modelComplexity ?? 1);
+  if (tmCameraRes) {
+    tmCameraRes.value = (tm.cameraWidth ?? 640) >= 1280 ? '1280' : '640';
+  }
+  const pose = Number(tm.poseStabilization ?? 0.62);
+  const hand = Number(tm.handStabilization ?? 0.58);
+  const face = Number(tm.faceStabilization ?? 0.48);
+  const hold = Number(tm.holdMs ?? 380);
+  const det = Number(tm.minDetectionConfidence ?? 0.72);
+  const trk = Number(tm.minTrackingConfidence ?? 0.72);
+  if (tmPoseStab) tmPoseStab.value = pose;
+  if (tmPoseStabVal) tmPoseStabVal.textContent = stabPct(pose);
+  if (tmHandStab) tmHandStab.value = hand;
+  if (tmHandStabVal) tmHandStabVal.textContent = stabPct(hand);
+  if (tmFaceStab) tmFaceStab.value = face;
+  if (tmFaceStabVal) tmFaceStabVal.textContent = stabPct(face);
+  if (tmHoldMs) tmHoldMs.value = hold;
+  if (tmHoldMsVal) tmHoldMsVal.textContent = `${Math.round(hold)} ms`;
+  if (tmDetConf) tmDetConf.value = det;
+  if (tmDetConfVal) tmDetConfVal.textContent = stabPct(det);
+  if (tmTrkConf) tmTrkConf.value = trk;
+  if (tmTrkConfVal) tmTrkConfVal.textContent = stabPct(trk);
+}
+
+function bindTrackingMedia() {
+  tmModel?.addEventListener('change', () => {
+    patchTrackingMedia({ modelComplexity: Number(tmModel.value) });
+    showToast('Tracking: model quality saved');
+  });
+
+  tmCameraRes?.addEventListener('change', () => {
+    const hd = tmCameraRes.value === '1280';
+    patchTrackingMedia({
+      cameraWidth: hd ? 1280 : 640,
+      cameraHeight: hd ? 720 : 480,
+    });
+    showToast(hd ? 'Tracking: HD camera saved — reload live page' : 'Tracking: standard camera saved — reload live page');
+  });
+
+  const bindStab = (input, valEl, key) => {
+    if (!input) return;
+    const save = () => {
+      const v = Number(input.value);
+      if (valEl) valEl.textContent = stabPct(v);
+      patchTrackingMedia({ [key]: v });
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
+  };
+  bindStab(tmPoseStab, tmPoseStabVal, 'poseStabilization');
+  bindStab(tmHandStab, tmHandStabVal, 'handStabilization');
+  bindStab(tmFaceStab, tmFaceStabVal, 'faceStabilization');
+
+  const saveHold = () => {
+    const v = Number(tmHoldMs.value);
+    if (tmHoldMsVal) tmHoldMsVal.textContent = `${Math.round(v)} ms`;
+    patchTrackingMedia({ holdMs: v, lostTrackingMs: v + 70 });
+  };
+  tmHoldMs?.addEventListener('input', saveHold);
+  tmHoldMs?.addEventListener('change', saveHold);
+
+  const bindConf = (input, valEl, key) => {
+    if (!input) return;
+    const save = () => {
+      const v = Number(input.value);
+      if (valEl) valEl.textContent = stabPct(v);
+      patchTrackingMedia({ [key]: v });
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
+  };
+  bindConf(tmDetConf, tmDetConfVal, 'minDetectionConfidence');
+  bindConf(tmTrkConf, tmTrkConfVal, 'minTrackingConfidence');
+}
 
 // ---------- Ground visibility (live scene) ----------
 
@@ -438,7 +531,8 @@ function syncShowGround() {
   showGroundInput.checked = s.scene?.showGround !== false;
 }
 
-if (showGroundInput) {
+function bindShowGround() {
+  if (!showGroundInput) return;
   showGroundInput.addEventListener('change', () => {
     setSettings({ scene: { showGround: showGroundInput.checked } });
     showToast(showGroundInput.checked ? 'Ground will show on live page' : 'Ground hidden on live page');
@@ -551,3 +645,28 @@ function bindFloorColor() {
     showToast('Floor color saved');
   });
 }
+
+// ---------- Page init (run after all DOM refs and binders are defined) ----------
+
+render();
+renderBackgroundPanel();
+syncShowGround();
+syncModelSurface();
+syncFloorColor();
+syncTrackingMedia();
+renderPlacementPanel();
+bindShowGround();
+bindPlacementPanel();
+bindModelSurface();
+bindFloorColor();
+bindCameraCheckboxes();
+bindCameraChangeMode();
+bindTrackingMedia();
+
+onSettingsChange(() => {
+  syncTrackingMedia();
+  syncShowGround();
+  syncModelSurface();
+  syncFloorColor();
+  renderPlacementPanel();
+});

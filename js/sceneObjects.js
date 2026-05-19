@@ -7,8 +7,13 @@ export class SceneObjects {
     this.audioManager = audioManager;
   }
   
-  // Create a detailed procedural house
-  createHouse(x, y, z) {
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @param {number} z
+   * @param {THREE.Object3D} [parent] — defaults to scene root
+   */
+  createHouse(x, y, z, parent = null) {
     const houseGroup = new THREE.Group();
     
     // Main house body
@@ -67,12 +72,12 @@ export class SceneObjects {
     houseGroup.add(chimney);
     
     houseGroup.position.set(x, y, z);
-    this.scene.add(houseGroup);
+    (parent || this.scene).add(houseGroup);
     return houseGroup;
   }
   
   // Create a detailed procedural tree
-  createTree(x, y, z) {
+  createTree(x, y, z, parent = null) {
     const treeGroup = new THREE.Group();
     
     // Tree trunk
@@ -107,7 +112,7 @@ export class SceneObjects {
     });
     
     treeGroup.position.set(x, y, z);
-    this.scene.add(treeGroup);
+    (parent || this.scene).add(treeGroup);
     return treeGroup;
   }
   

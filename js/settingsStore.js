@@ -48,11 +48,34 @@ export const DEFAULT_SETTINGS = Object.freeze({
   },
   // Lerp amounts applied per part. Lower = smoother (laggier), higher = snappier (twitchier).
   smoothing: {
-    face: 0.7,
-    pose: 0.7,
-    hands: 0.8,
-    fingers: 0.8,
-    legs: 0.4, // legs are noisy when partly visible — smooth more by default
+    face: 0.22,
+    pose: 0.2,
+    hands: 0.24,
+    fingers: 0.18,
+    legs: 0.16,
+  },
+  /** MediaPipe + temporal stabilization (reduces flicker like Meet-style filters). */
+  trackingMedia: {
+    modelComplexity: 1,
+    minDetectionConfidence: 0.72,
+    minTrackingConfidence: 0.72,
+    smoothLandmarks: true,
+    /** 0..1 — higher = smoother body motion. */
+    poseStabilization: 0.62,
+    /** Legacy single hand slider — used when wrist/finger not set. */
+    handStabilization: 0.5,
+    wristStabilization: 0.4,
+    fingerStabilization: 0.52,
+    faceStabilization: 0.48,
+    /** Keep last good pose/hand when visibility dips briefly (ms). */
+    holdMs: 380,
+    lostTrackingMs: 450,
+    visibilityLegs: 0.42,
+    visibilityArms: 0.38,
+    visibilityHips: 0.12,
+    /** 640 or 1280 — higher can improve hands/face at CPU cost. */
+    cameraWidth: 640,
+    cameraHeight: 480,
   },
   // Live scene options (not sensitivity sliders).
   scene: {
@@ -115,14 +138,55 @@ function loadFromStorage() {
   }
 }
 
+/** Ensure trackingMedia is always a full object (null in storage breaks saves). */
+function normalizeSettings(settings) {
+  const def = DEFAULT_SETTINGS.trackingMedia;
+  const tm = settings.trackingMedia;
+  let changed = false;
+
+  if (!tm || typeof tm !== 'object' || Array.isArray(tm)) {
+    settings.trackingMedia = clone(def);
+    return true;
+  }
+
+  const merged = { ...clone(def), ...tm };
+  for (const key of Object.keys(def)) {
+    if (settings.trackingMedia[key] !== merged[key]) {
+      changed = true;
+      break;
+    }
+  }
+  if (changed) settings.trackingMedia = merged;
+  return changed;
+}
+
 export function getSettings() {
   if (_cached) return _cached;
   _cached = deepMerge(clone(DEFAULT_SETTINGS), loadFromStorage());
+  if (normalizeSettings(_cached)) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(_cached));
+    } catch {
+      // ignore
+    }
+  }
   return _cached;
+}
+
+export function getTrackingMedia() {
+  const tm = getSettings().trackingMedia;
+  return { ...clone(DEFAULT_SETTINGS.trackingMedia), ...tm };
+}
+
+/** Merge partial keys into `trackingMedia` without dropping other fields. */
+export function patchTrackingMedia(partial) {
+  const trackingMedia = { ...getTrackingMedia(), ...partial };
+  return setSettings({ trackingMedia });
 }
 
 export function setSettings(partial) {
   const next = deepMerge(clone(getSettings()), partial);
+  normalizeSettings(next);
   _cached = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
@@ -146,6 +210,7 @@ export function resetSettings() {
     // ignore
   }
   _cached = clone(DEFAULT_SETTINGS);
+  normalizeSettings(_cached);
   listeners.forEach((cb) => {
     try {
       cb(_cached);
