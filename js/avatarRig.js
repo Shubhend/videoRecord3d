@@ -322,18 +322,18 @@ export class AvatarRig {
     const sideEnabled = enabled[sideKey] !== false;
     const sideSens = sensitivity[sideKey] ?? 1.0;
 
-    // Wrist
+    // Wrist — hand solve + pose arm chain (pose stabilizes shoulder–wrist link)
     if (sideEnabled) {
-      this.rigRotation(
-        `${prefix}Hand`,
-        {
-          z: riggedPose?.[`${prefix}Hand`]?.z || 0,
-          y: riggedHand[`${prefix}Wrist`]?.y || 0,
-          x: riggedHand[`${prefix}Wrist`]?.x || 0,
-        },
-        sideSens,
-        smoothing.hands
-      );
+      const poseHand = riggedPose?.[`${prefix}Hand`];
+      const handWrist = riggedHand[`${prefix}Wrist`];
+      const wristRot = {
+        x: handWrist?.x ?? poseHand?.x ?? 0,
+        y: handWrist?.y ?? poseHand?.y ?? 0,
+        z: handWrist?.z ?? poseHand?.z ?? 0,
+        rotationOrder: handWrist?.rotationOrder || poseHand?.rotationOrder,
+      };
+      const wristLerp = Math.min(0.95, (smoothing.hands ?? 0.24) * 1.15);
+      this.rigRotation(`${prefix}Hand`, wristRot, sideSens, wristLerp);
     } else {
       this.resetBone(`${prefix}Hand`);
     }
@@ -341,11 +341,12 @@ export class AvatarRig {
     // Fingers — gated by both the side toggle AND the global "fingers" toggle
     if (sideEnabled && enabled.fingers) {
       const f = sensitivity.fingers;
+      const fingerLerp = smoothing.fingers ?? 0.18;
       FINGERS.forEach((finger) => {
         FINGER_SEGMENTS.forEach((segment) => {
           const boneName = `${prefix}${finger}${segment}`;
           if (riggedHand[boneName]) {
-            this.rigRotation(boneName, riggedHand[boneName], f, smoothing.fingers);
+            this.rigRotation(boneName, riggedHand[boneName], f, fingerLerp);
           }
         });
       });
@@ -371,7 +372,8 @@ export class AvatarRig {
     const autoRelaxScale = this.settings.sensitivity.autoRelax ?? 1.0;
     if (autoRelaxEnabled && autoRelaxScale > 0) {
       const now = performance.now();
-      const lostMs = Config.tracking.lostTrackingMs;
+      const lostMs =
+        this.settings.trackingMedia?.lostTrackingMs ?? Config.tracking.lostTrackingMs;
       const base = Config.tracking.restRelaxRate;
       const rates = {
         bones: base.bones * autoRelaxScale,
