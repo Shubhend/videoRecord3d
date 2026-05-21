@@ -28,6 +28,9 @@ export class AudioLipsync {
     this._intensity = 1.0;
     this._isPlaying = false;
     this._stoppedByUser = false;
+    /** Seconds into the clip; updated on pause, used to resume. */
+    this._playbackOffset = 0;
+    this._segmentStartCtxTime = 0;
 
     this._onEndedCallbacks = [];
   }
@@ -124,10 +127,11 @@ export class AudioLipsync {
   }
 
   /**
-   * Start (or restart) playback. AudioBufferSourceNode is one-shot, so each
-   * call creates a fresh source.
+   * Start or resume playback. AudioBufferSourceNode is one-shot — each play()
+   * creates a new source, optionally offset into the buffer.
+   * @param {boolean} fromStart — if true, always start at 0:00
    */
-  async play() {
+  async play(fromStart = false) {
     if (!this.audioBuffer || !this.audioContext) {
       throw new Error('No audio loaded.');
     }
@@ -135,12 +139,17 @@ export class AudioLipsync {
       await this.audioContext.resume();
     }
 
-    // Tear down any previous source.
-    if (this.bufferSource) {
-      try { this.bufferSource.stop(); } catch (e) {}
-      try { this.bufferSource.disconnect(); } catch (e) {}
-      this.bufferSource = null;
+    if (fromStart) {
+      this._playbackOffset = 0;
     }
+
+    const offset = Math.min(
+      this.audioBuffer.duration,
+      Math.max(0, this._playbackOffset)
+    );
+    this._playbackOffset = offset;
+
+    this._haltSource();
 
     this.bufferSource = this.audioContext.createBufferSource();
     this.bufferSource.buffer = this.audioBuffer;
@@ -148,27 +157,35 @@ export class AudioLipsync {
 
     this._stoppedByUser = false;
     this._isPlaying = true;
+    this._segmentStartCtxTime = this.audioContext.currentTime;
 
     this.bufferSource.onended = () => {
-      // 'ended' fires both for natural-end and user-stop. Only fire our
-      // onEnded callbacks when the user didn't explicitly stop.
       this._isPlaying = false;
       if (this._stoppedByUser) return;
+      this._playbackOffset = this.audioBuffer.duration;
       this._onEndedCallbacks.forEach((cb) => {
         try { cb(); } catch (e) { console.error(e); }
       });
     };
 
-    this.bufferSource.start(0);
+    this.bufferSource.start(0, offset);
   }
 
+  /** Pause and remember position for resume(). */
   pause() {
-    // AudioBufferSourceNode doesn't support pause/resume natively.
-    // We treat pause as stop for simplicity.
-    this.stop();
+    if (this._isPlaying) {
+      this._playbackOffset = this.getCurrentTime();
+    }
+    this._haltSource();
   }
 
+  /** Stop and reset to the beginning. */
   stop() {
+    this._playbackOffset = 0;
+    this._haltSource();
+  }
+
+  _haltSource() {
     this._stoppedByUser = true;
     if (this.bufferSource) {
       try { this.bufferSource.stop(); } catch (e) {}
@@ -180,6 +197,19 @@ export class AudioLipsync {
 
   isPlaying() {
     return this._isPlaying;
+  }
+
+  /** Current playback position in seconds (while playing or after pause). */
+  getCurrentTime() {
+    if (!this.audioBuffer) return 0;
+    if (!this._isPlaying || !this.audioContext) {
+      return Math.min(this.audioBuffer.duration, Math.max(0, this._playbackOffset));
+    }
+    const elapsed = this.audioContext.currentTime - this._segmentStartCtxTime;
+    return Math.min(
+      this.audioBuffer.duration,
+      Math.max(0, this._playbackOffset + elapsed)
+    );
   }
 
   /**
@@ -303,6 +333,8 @@ export class AudioLipsync {
     this._lastWeights = { A: 0, I: 0, U: 0, E: 0, O: 0, mouthOpen: 0 };
     this._isPlaying = false;
     this._stoppedByUser = false;
+    this._playbackOffset = 0;
+    this._segmentStartCtxTime = 0;
     this._onEndedCallbacks = [];
   }
 }

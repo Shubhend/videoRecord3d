@@ -131,14 +131,13 @@ function buildRow(def, settings) {
       </div>
     </div>
     <input
-      type="range" min="0" max="${max}" step="0.05"
-      class="slider"
-      data-slider="${def.key}"
+      type="number" min="0" max="${max}" step="0.05"
+      class="num-input ${sens > highThreshold ? 'high' : ''}"
+      data-num="${def.key}"
       data-max="${max}"
       value="${sens}"
       ${enabled ? '' : 'disabled'}
     />
-    <div class="row-value ${sens > highThreshold ? 'high' : ''}" data-value="${def.key}">${pct(sens)}</div>
   `;
   return row;
 }
@@ -168,12 +167,11 @@ function buildCameraRow(def, settings) {
       </div>
     </div>
     <input
-      type="range" min="${min}" max="${max}" step="${step}"
-      class="slider"
-      data-cam-slider="${def.key}"
+      type="number" min="${min}" max="${max}" step="${step}"
+      class="num-input"
+      data-cam-num="${def.key}"
       value="${val}"
     />
-    <div class="row-value" data-cam-value="${def.key}">${fmt(val)}</div>
   `;
   return row;
 }
@@ -204,19 +202,15 @@ function renderCameraPanel() {
     changeMode.value = cam.changeMode === 'hold' ? 'hold' : 'random';
   }
 
-  container.querySelectorAll('input[data-cam-slider]').forEach((input) => {
-    const key = input.dataset.camSlider;
-    const def = ROWS.camera.find((d) => d.key === key);
-    const fmt = def?.format || pct;
-    const valueEl = container.querySelector(`[data-cam-value="${key}"]`);
-
-    input.addEventListener('input', () => {
+  container.querySelectorAll('input[data-cam-num]').forEach((input) => {
+    const key = input.dataset.camNum;
+    const save = () => {
       const v = Number(input.value);
-      if (valueEl) valueEl.textContent = fmt(v);
-    });
-    input.addEventListener('change', () => {
-      setSettings({ camera: { [key]: Number(input.value) } });
-    });
+      if (!Number.isFinite(v)) return;
+      setSettings({ camera: { [key]: v } });
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
   });
 }
 
@@ -266,36 +260,24 @@ function bindRowEvents() {
       const key = input.dataset.toggle;
       const checked = input.checked;
       setSettings({ enabled: { [key]: checked } });
-      // Enable/disable the matching slider
-      const slider = document.querySelector(`input[data-slider="${key}"]`);
-      if (slider) slider.disabled = !checked;
+      const numInput = document.querySelector(`input[data-num="${key}"]`);
+      if (numInput) numInput.disabled = !checked;
       showToast(`${labelFor(key)}: ${checked ? 'on' : 'off'}`);
     });
   });
 
-  document.querySelectorAll('input[data-slider]').forEach((input) => {
-    let lastWritten = Number(input.value);
+  document.querySelectorAll('input[data-num]').forEach((input) => {
     const max = Number(input.dataset.max ?? 2);
     const highThreshold = max * 0.7;
-    input.addEventListener('input', () => {
-      const key = input.dataset.slider;
+    const save = () => {
+      const key = input.dataset.num;
       const v = Number(input.value);
-      const valueEl = document.querySelector(`[data-value="${key}"]`);
-      if (valueEl) {
-        valueEl.textContent = pct(v);
-        valueEl.classList.toggle('high', v > highThreshold);
-      }
-      // Throttle writes to localStorage so dragging is smooth
-      if (Math.abs(v - lastWritten) >= 0.05) {
-        lastWritten = v;
-        setSettings({ sensitivity: { [key]: v } });
-      }
-    });
-    input.addEventListener('change', () => {
-      const key = input.dataset.slider;
-      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      input.classList.toggle('high', v > highThreshold);
       setSettings({ sensitivity: { [key]: v } });
-    });
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
   });
 }
 
@@ -428,21 +410,11 @@ bgClearBtn.addEventListener('click', async () => {
 const tmModel = document.getElementById('tm-model-complexity');
 const tmCameraRes = document.getElementById('tm-camera-res');
 const tmPoseStab = document.getElementById('tm-pose-stab');
-const tmPoseStabVal = document.getElementById('tm-pose-stab-val');
 const tmHandStab = document.getElementById('tm-hand-stab');
-const tmHandStabVal = document.getElementById('tm-hand-stab-val');
 const tmFaceStab = document.getElementById('tm-face-stab');
-const tmFaceStabVal = document.getElementById('tm-face-stab-val');
 const tmHoldMs = document.getElementById('tm-hold-ms');
-const tmHoldMsVal = document.getElementById('tm-hold-ms-val');
 const tmDetConf = document.getElementById('tm-det-conf');
-const tmDetConfVal = document.getElementById('tm-det-conf-val');
 const tmTrkConf = document.getElementById('tm-trk-conf');
-const tmTrkConfVal = document.getElementById('tm-trk-conf-val');
-
-function stabPct(v) {
-  return `${Math.round(Number(v) * 100)}%`;
-}
 
 function syncTrackingMedia() {
   const tm = getSettings().trackingMedia || {};
@@ -457,17 +429,11 @@ function syncTrackingMedia() {
   const det = Number(tm.minDetectionConfidence ?? 0.72);
   const trk = Number(tm.minTrackingConfidence ?? 0.72);
   if (tmPoseStab) tmPoseStab.value = pose;
-  if (tmPoseStabVal) tmPoseStabVal.textContent = stabPct(pose);
   if (tmHandStab) tmHandStab.value = hand;
-  if (tmHandStabVal) tmHandStabVal.textContent = stabPct(hand);
   if (tmFaceStab) tmFaceStab.value = face;
-  if (tmFaceStabVal) tmFaceStabVal.textContent = stabPct(face);
   if (tmHoldMs) tmHoldMs.value = hold;
-  if (tmHoldMsVal) tmHoldMsVal.textContent = `${Math.round(hold)} ms`;
   if (tmDetConf) tmDetConf.value = det;
-  if (tmDetConfVal) tmDetConfVal.textContent = stabPct(det);
   if (tmTrkConf) tmTrkConf.value = trk;
-  if (tmTrkConfVal) tmTrkConfVal.textContent = stabPct(trk);
 }
 
 function bindTrackingMedia() {
@@ -485,40 +451,22 @@ function bindTrackingMedia() {
     showToast(hd ? 'Tracking: HD camera saved — reload live page' : 'Tracking: standard camera saved — reload live page');
   });
 
-  const bindStab = (input, valEl, key) => {
+  const bindNum = (input, key, mapExtra) => {
     if (!input) return;
     const save = () => {
       const v = Number(input.value);
-      if (valEl) valEl.textContent = stabPct(v);
-      patchTrackingMedia({ [key]: v });
+      if (!Number.isFinite(v)) return;
+      patchTrackingMedia({ [key]: v, ...(mapExtra ? mapExtra(v) : {}) });
     };
     input.addEventListener('input', save);
     input.addEventListener('change', save);
   };
-  bindStab(tmPoseStab, tmPoseStabVal, 'poseStabilization');
-  bindStab(tmHandStab, tmHandStabVal, 'handStabilization');
-  bindStab(tmFaceStab, tmFaceStabVal, 'faceStabilization');
-
-  const saveHold = () => {
-    const v = Number(tmHoldMs.value);
-    if (tmHoldMsVal) tmHoldMsVal.textContent = `${Math.round(v)} ms`;
-    patchTrackingMedia({ holdMs: v, lostTrackingMs: v + 70 });
-  };
-  tmHoldMs?.addEventListener('input', saveHold);
-  tmHoldMs?.addEventListener('change', saveHold);
-
-  const bindConf = (input, valEl, key) => {
-    if (!input) return;
-    const save = () => {
-      const v = Number(input.value);
-      if (valEl) valEl.textContent = stabPct(v);
-      patchTrackingMedia({ [key]: v });
-    };
-    input.addEventListener('input', save);
-    input.addEventListener('change', save);
-  };
-  bindConf(tmDetConf, tmDetConfVal, 'minDetectionConfidence');
-  bindConf(tmTrkConf, tmTrkConfVal, 'minTrackingConfidence');
+  bindNum(tmPoseStab, 'poseStabilization');
+  bindNum(tmHandStab, 'handStabilization');
+  bindNum(tmFaceStab, 'faceStabilization');
+  bindNum(tmHoldMs, 'holdMs', (v) => ({ lostTrackingMs: v + 70 }));
+  bindNum(tmDetConf, 'minDetectionConfidence');
+  bindNum(tmTrkConf, 'minTrackingConfidence');
 }
 
 // ---------- Ground visibility (live scene) ----------

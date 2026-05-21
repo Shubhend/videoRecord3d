@@ -5,6 +5,7 @@
 
 import { Config } from './config.js';
 import { getSettings } from './settingsStore.js';
+import { estimateHeadPose } from './headPoseEstimate.js';
 import { smoothRotation } from './utils.js';
 import {
   smoothPose,
@@ -62,13 +63,34 @@ function clamp01(v) {
 }
 
 export class Tracking {
-  constructor(videoElement, avatarRig, onStatusUpdate, onDistance) {
+  /**
+   * @param {HTMLVideoElement} videoElement
+   * @param {import('./avatarRig.js').AvatarRig} avatarRig
+   * @param {(status: string) => void} [onStatusUpdate]
+   * @param {(ratio: number) => void} [onDistance]
+   * @param {{ faceOnly?: boolean, mirrorPreview?: boolean }} [options]
+   */
+  constructor(videoElement, avatarRig, onStatusUpdate, onDistance, options = {}) {
     this.video = videoElement;
     this.avatarRig = avatarRig;
     this.onStatusUpdate = onStatusUpdate;
-    this.onDistance = onDistance || null;
+    this.onDistance = options.faceOnly ? null : (onDistance || null);
+    this.faceOnly = options.faceOnly === true;
+    this.mirrorPreview = options.mirrorPreview === true;
+    /** Holistic input size on record page (must match mapLandmarkFromCaptureFrame). */
+    this.captureFrameW = 640;
+    this.captureFrameH = 480;
     this.settings = getSettings();
     this.holistic = null;
+    this._running = false;
+    this._frameId = null;
+    this._frameTimer = null;
+    this._sending = false;
+    this._sendTimeout = null;
+    this._mpCamera = null;
+    this._frameCanvas = null;
+    this._frameCtx = null;
+    this._frameIntervalMs = options.faceOnly ? 33 : 33;
     this.smoothedValues = {
       face: null,
       pose: null,
@@ -78,6 +100,9 @@ export class Tracking {
 
     this._handHold = { left: null, right: null };
     this._lastRiggedPose = null;
+    this.lastFaceLandmarks = null;
+    this.faceDetected = false;
+    this.lastHeadPose = null;
 
     this._distance = {
       baseline: null,
@@ -122,37 +147,242 @@ export class Tracking {
     for (const g of Object.values(this._gates)) g.setHoldMs(hold);
 
     if (this.holistic) {
+      const faceLoose = this.faceOnly ? 0.4 : null;
       this.holistic.setOptions({
-        modelComplexity: tm.modelComplexity ?? Config.holistic.modelComplexity,
+        modelComplexity: this.faceOnly
+          ? 0
+          : (tm.modelComplexity ?? Config.holistic.modelComplexity),
         smoothLandmarks: tm.smoothLandmarks !== false,
-        minDetectionConfidence: tm.minDetectionConfidence ?? Config.holistic.minDetectionConfidence,
-        minTrackingConfidence: tm.minTrackingConfidence ?? Config.holistic.minTrackingConfidence,
+        minDetectionConfidence:
+          faceLoose ?? tm.minDetectionConfidence ?? Config.holistic.minDetectionConfidence,
+        minTrackingConfidence:
+          faceLoose ?? tm.minTrackingConfidence ?? Config.holistic.minTrackingConfidence,
         refineFaceLandmarks: true,
+        enableSegmentation: false,
       });
     }
   }
   
   async init() {
+    if (typeof Holistic === 'undefined') {
+      throw new Error('MediaPipe Holistic did not load. Check your network and refresh.');
+    }
+
+    if (this.onStatusUpdate) this.onStatusUpdate('Loading face tracker…');
+
     this.holistic = new Holistic({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${file}`
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${file}`,
     });
     
     this.setSettings(this.settings);
     this.holistic.onResults((results) => this.processResults(results));
+
+    if (typeof this.holistic.initialize === 'function') {
+      await this.holistic.initialize();
+    }
   }
   
-  async start() {
+  /**
+   * Start sending frames to MediaPipe.
+   * @param {{ useVideoElement?: boolean }} [options]
+   *   useVideoElement: true when the video already has a getUserMedia stream (record page).
+   */
+  async start(options = {}) {
+    this.stop();
+
+    const useVideo = options.useVideoElement === true || this.faceOnly;
+
+    if (useVideo) {
+      await this._waitForVideoReady();
+      await this._ensureVideoPlaying();
+      this._running = true;
+      if (this.onStatusUpdate) this.onStatusUpdate('Searching…');
+      this._scheduleVideoFrame();
+      return;
+    }
+
     const tm = this._tm();
     const width = tm.cameraWidth ?? Config.camera.width;
     const height = tm.cameraHeight ?? Config.camera.height;
-    const camera = new Camera(this.video, {
+    this._mpCamera = new Camera(this.video, {
       onFrame: async () => {
-        await this.holistic.send({ image: this.video });
+        if (!this._running) return;
+        try {
+          await this.holistic.send({ image: this.video });
+        } catch (err) {
+          console.warn('[Tracking] holistic.send:', err);
+        }
       },
       width,
       height,
     });
-    await camera.start();
+    this._running = true;
+    await this._mpCamera.start();
+  }
+
+  stop() {
+    this._running = false;
+    if (this._frameId != null) {
+      cancelAnimationFrame(this._frameId);
+      this._frameId = null;
+    }
+    if (this._frameTimer != null) {
+      clearTimeout(this._frameTimer);
+      this._frameTimer = null;
+    }
+    if (this._sendTimeout != null) {
+      clearTimeout(this._sendTimeout);
+      this._sendTimeout = null;
+    }
+    this._sending = false;
+    if (this._mpCamera) {
+      try {
+        this._mpCamera.stop();
+      } catch {
+        // ignore
+      }
+      this._mpCamera = null;
+    }
+  }
+
+  async disposeHolistic() {
+    this.stop();
+    if (this.holistic) {
+      try {
+        await this.holistic.close?.();
+      } catch {
+        // ignore
+      }
+      this.holistic = null;
+    }
+  }
+
+  _waitForVideoReady() {
+    const ready = () =>
+      this.video.readyState >= 2 &&
+      this.video.videoWidth > 0 &&
+      this.video.videoHeight > 0;
+
+    if (ready()) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      const done = () => {
+        if (ready()) resolve();
+      };
+      const opts = { once: true };
+      this.video.addEventListener('loadedmetadata', done, opts);
+      this.video.addEventListener('loadeddata', done, opts);
+      this.video.addEventListener('resize', done, opts);
+      setTimeout(resolve, 3000);
+    });
+  }
+
+  async _ensureVideoPlaying() {
+    if (this.video.paused) {
+      try {
+        await this.video.play();
+      } catch {
+        // autoplay policies — user may need to interact
+      }
+    }
+  }
+
+  _ensureCaptureCanvas() {
+    if (!this._frameCanvas) {
+      this._frameCanvas = document.createElement('canvas');
+      this._frameCtx = this._frameCanvas.getContext('2d', { willReadFrequently: true });
+    }
+  }
+
+  /** Draw current video frame to a fixed-size canvas (Holistic is more reliable than raw video). */
+  _captureVideoFrame() {
+    this._ensureCaptureCanvas();
+    const vw = this.video.videoWidth || 640;
+    const vh = this.video.videoHeight || 480;
+    const tm = this._tm();
+    const tw = this.faceOnly ? 640 : (tm.cameraWidth ?? Config.camera.width);
+    const th = this.faceOnly ? 480 : (tm.cameraHeight ?? Config.camera.height);
+    this._frameCanvas.width = tw;
+    this._frameCanvas.height = th;
+
+    // Record page: letterbox like the mirrored webcam preview (object-fit: contain).
+    // Main avatar page: cover crop for fuller body in frame.
+    const scale = this.faceOnly
+      ? Math.min(tw / vw, th / vh)
+      : Math.max(tw / vw, th / vh);
+    const sw = vw * scale;
+    const sh = vh * scale;
+    const ox = (tw - sw) / 2;
+    const oy = (th - sh) / 2;
+    if (this.faceOnly) {
+      this._frameCtx.fillStyle = '#000';
+      this._frameCtx.fillRect(0, 0, tw, th);
+      this.captureFrameW = tw;
+      this.captureFrameH = th;
+    }
+    if (this.faceOnly && this.mirrorPreview) {
+      this._frameCtx.save();
+      this._frameCtx.translate(tw, 0);
+      this._frameCtx.scale(-1, 1);
+      this._frameCtx.drawImage(this.video, ox, oy, sw, sh);
+      this._frameCtx.restore();
+    } else {
+      this._frameCtx.drawImage(this.video, ox, oy, sw, sh);
+    }
+    return this._frameCanvas;
+  }
+
+  setMirrorPreview(enabled) {
+    this.mirrorPreview = enabled === true;
+  }
+
+  _scheduleVideoFrame() {
+    if (!this._running) return;
+    this._frameTimer = setTimeout(() => {
+      this._frameTimer = null;
+      void this._sendVideoFrame();
+    }, this._frameIntervalMs);
+  }
+
+  async _sendVideoFrame() {
+    if (!this._running || !this.holistic) return;
+
+    if (
+      this.video.readyState < 2 ||
+      this.video.videoWidth < 1 ||
+      this.video.videoHeight < 1
+    ) {
+      this._scheduleVideoFrame();
+      return;
+    }
+
+    if (this._sending) {
+      this._scheduleVideoFrame();
+      return;
+    }
+
+    this._sending = true;
+    if (this._sendTimeout) clearTimeout(this._sendTimeout);
+    this._sendTimeout = setTimeout(() => {
+      if (this._sending) {
+        console.warn('[Tracking] holistic.send timed out — retrying');
+        this._sending = false;
+      }
+    }, 4000);
+
+    const image = this._captureVideoFrame();
+    try {
+      await this.holistic.send({ image });
+    } catch (err) {
+      console.warn('[Tracking] holistic.send:', err);
+    } finally {
+      if (this._sendTimeout) {
+        clearTimeout(this._sendTimeout);
+        this._sendTimeout = null;
+      }
+      this._sending = false;
+      this._scheduleVideoFrame();
+    }
   }
   
   processResults(results) {
@@ -168,26 +398,34 @@ export class Tracking {
     
     if (faceLandmarks) {
       status.push('Face ✓');
+      this.faceDetected = true;
+      this.lastFaceLandmarks = faceLandmarks;
+      this.lastHeadPose = estimateHeadPose(faceLandmarks);
       this.processFace(faceLandmarks);
-    }
-    
-    if (pose2DLandmarks && pose3DLandmarks) {
-      status.push('Pose ✓');
-      this.processPose(pose2DLandmarks, pose3DLandmarks, now);
-    }
-    
-    if (leftHandLandmarks) {
-      status.push('L-Hand ✓');
-      this.processHand('left', leftHandLandmarks);
     } else {
-      this._holdHand('left');
+      this.faceDetected = false;
+      this.lastHeadPose = null;
     }
     
-    if (rightHandLandmarks) {
-      status.push('R-Hand ✓');
-      this.processHand('right', rightHandLandmarks);
-    } else {
-      this._holdHand('right');
+    if (!this.faceOnly) {
+      if (pose2DLandmarks && pose3DLandmarks) {
+        status.push('Pose ✓');
+        this.processPose(pose2DLandmarks, pose3DLandmarks, now);
+      }
+
+      if (leftHandLandmarks) {
+        status.push('L-Hand ✓');
+        this.processHand('left', leftHandLandmarks);
+      } else {
+        this._holdHand('left');
+      }
+
+      if (rightHandLandmarks) {
+        status.push('R-Hand ✓');
+        this.processHand('right', rightHandLandmarks);
+      } else {
+        this._holdHand('right');
+      }
     }
     
     if (this.onStatusUpdate) {
@@ -196,6 +434,14 @@ export class Tracking {
   }
   
   processFace(faceLandmarks) {
+    this.lastFaceLandmarks = faceLandmarks || null;
+    this.lastHeadPose = estimateHeadPose(faceLandmarks);
+
+    if (typeof Kalidokit === 'undefined') {
+      console.warn('[Tracking] Kalidokit not loaded');
+      return;
+    }
+
     const tm = this._tm();
     const faceStab = tm.faceStabilization ?? Config.tracking.stabilization;
 

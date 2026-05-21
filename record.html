@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edge AI Avatar — Webcam Record</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --accent: #00ff88;
+        --text: #e7ecf3;
+        --text-dim: #9aa3b2;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.16);
+        --danger: #ff5566;
+        --warn: #ffcc44;
+        --topbar-h: 64px;
+        --panel-w: 320px;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        overflow: hidden;
+        background: radial-gradient(ellipse at top, #16213e 0%, #0a0e1a 60%, #06080f 100%);
+        color: var(--text);
+        font-family: Inter, system-ui, sans-serif;
+      }
+
+      .topbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: var(--topbar-h);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        background: rgba(10, 14, 26, 0.96);
+        border-bottom: 1px solid var(--border);
+        z-index: 100;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--text);
+        font-weight: 700;
+      }
+      .brand-mark {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), #00c2ff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #021;
+        font-size: 11px;
+        font-weight: 800;
+      }
+      .nav-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 10px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 10px;
+        border: 1px solid var(--border-strong);
+        background: rgba(22, 28, 48, 0.6);
+        color: var(--text);
+        cursor: pointer;
+        text-decoration: none;
+        font-family: inherit;
+      }
+      .btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.28); }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .btn.primary { background: var(--accent); color: #021; border-color: var(--accent); }
+      .btn.danger { color: var(--danger); border-color: rgba(255, 85, 102, 0.4); }
+      .btn.warn { color: #1a1400; background: var(--warn); border-color: var(--warn); }
+      .btn.block { width: 100%; }
+
+      .layout {
+        position: fixed;
+        top: var(--topbar-h);
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: grid;
+        grid-template-columns: 1fr var(--panel-w);
+        min-height: 0;
+      }
+      @media (max-width: 800px) {
+        .layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+        :root { --panel-w: 100%; }
+      }
+
+      .viewport {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        background: #000;
+        overflow: hidden;
+      }
+      .camera-stack {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      .camera-stack video,
+      .camera-stack canvas,
+      #playback {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .camera-stack video,
+      #playback {
+        object-fit: contain;
+        z-index: 1;
+      }
+      .camera-stack #face-overlay {
+        object-fit: contain;
+        z-index: 10;
+        pointer-events: none;
+      }
+      #face-overlay.hidden { display: none !important; }
+
+      .head-coord-panel {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        background: rgba(10, 16, 32, 0.55);
+      }
+      .head-coord-lines {
+        margin: 0;
+        padding: 8px;
+        font-size: 11px;
+        line-height: 1.45;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--text);
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 6px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .head-coord-lines.match-good { color: #6ee7a0; }
+      .head-coord-lines.match-fair { color: #fbbf24; }
+      .head-coord-lines.match-poor { color: #f87171; }
+
+      .model-preview-wrap {
+        border: 1px solid var(--border-strong);
+        border-radius: 10px;
+        overflow: hidden;
+        background: #141c32;
+        min-height: 180px;
+      }
+      #model-preview-canvas {
+        display: block;
+        width: 100%;
+        height: 180px;
+      }
+      .model-diag {
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text-dim);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 8px;
+        padding: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .model-diag.ok { border: 1px solid rgba(0, 255, 136, 0.35); }
+      .model-diag.warn { border: 1px solid rgba(255, 204, 68, 0.45); }
+      .load-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(0, 255, 136, 0.12);
+        color: var(--accent);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+      }
+      .load-badge.pending {
+        background: rgba(255, 204, 68, 0.1);
+        color: var(--warn);
+        border-color: rgba(255, 204, 68, 0.35);
+      }
+      .load-badge.error {
+        background: rgba(255, 85, 102, 0.1);
+        color: var(--danger);
+        border-color: rgba(255, 85, 102, 0.35);
+      }
+      #preview.hidden { display: none; }
+      #playback { display: none; z-index: 3; }
+      #playback.visible { display: block; }
+
+      .panel-section {
+        border-top: 1px solid var(--border);
+        padding-top: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .panel-section h2 {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .field-label {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-bottom: 4px;
+      }
+      select.field {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border-strong);
+        background: rgba(22, 28, 48, 0.8);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 13px;
+      }
+      .row-slider {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+      }
+      input[type="range"].slider {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+      #tracking-status {
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+
+      #loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        background: rgba(10, 14, 26, 0.9);
+        z-index: 5;
+      }
+      #loading.hidden { display: none; }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      #rec-badge {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.65);
+        font-size: 13px;
+        font-weight: 700;
+        z-index: 4;
+      }
+      #rec-badge.visible { display: flex; }
+      #rec-badge.paused .rec-dot { background: var(--warn); animation: none; }
+      .rec-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--danger);
+        animation: pulse 1s ease-in-out infinite;
+      }
+      @keyframes pulse { 50% { opacity: 0.35; } }
+
+      .sidebar {
+        border-left: 1px solid var(--border);
+        background: rgba(10, 14, 26, 0.85);
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      @media (max-width: 800px) {
+        .sidebar { border-left: none; border-top: 1px solid var(--border); }
+      }
+      .sidebar h1 { font-size: 18px; font-weight: 700; }
+      .sidebar p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+      #status-line {
+        font-size: 12px;
+        color: var(--accent);
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: rgba(0, 255, 136, 0.08);
+        border: 1px solid rgba(0, 255, 136, 0.2);
+      }
+      .timer {
+        font-size: 32px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
+      }
+      .controls { display: flex; flex-direction: column; gap: 8px; }
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .toggle-row input { accent-color: var(--accent); }
+
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(120%);
+        padding: 12px 20px;
+        border-radius: 10px;
+        background: rgba(22, 28, 48, 0.95);
+        border: 1px solid var(--border-strong);
+        font-size: 14px;
+        z-index: 200;
+        transition: transform 0.25s ease;
+        pointer-events: none;
+      }
+      .toast.show { transform: translateX(-50%) translateY(0); }
+      .toast.error { border-color: rgba(255, 85, 102, 0.5); color: #ffb3bc; }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="index.html" class="brand">
+        <span class="brand-mark">EA</span>
+        <span>Webcam Record</span>
+      </a>
+      <div class="nav-actions">
+        <a href="index.html" class="btn">Live Avatar</a>
+        <a href="settings.html" class="btn">Settings</a>
+      </div>
+    </header>
+
+    <div class="layout">
+      <div class="viewport">
+        <div id="loading">
+          <div class="spinner"></div>
+          <p id="loading-text">Starting camera…</p>
+        </div>
+        <div id="rec-badge">
+          <span class="rec-dot"></span>
+          <span id="rec-label">REC</span>
+          <span data-rec-timer>00:00</span>
+        </div>
+        <div class="camera-stack">
+          <video id="preview" playsinline autoplay muted></video>
+          <canvas id="face-overlay"></canvas>
+        </div>
+        <canvas id="jeeliz-canvas" width="512" height="512" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;pointer-events:none;opacity:0;"></canvas>
+        <video id="playback" playsinline controls></video>
+      </div>
+      <canvas id="composite-canvas" width="1280" height="720" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;pointer-events:none;"></canvas>
+
+      <aside class="sidebar">
+        <div>
+          <h1>Record yourself</h1>
+          <p>Pipeline: <strong>Webcam → Jeeliz face detect/track → Head pose → VRM align → WebGL</strong> (<a href="https://github.com/jeeliz/jeelizFaceFilter" target="_blank" rel="noopener">Jeeliz Face Filter</a>, <a href="https://github.com/jeeliz/jeelizFaceFilter/tree/master/demos/threejs/tiger" target="_blank" rel="noopener">tiger demo pose</a>)</p>
+          <pre id="pipeline-status" class="model-diag warn" style="margin-top:8px;font-size:10px;line-height:1.45;">Starting pipeline…</pre>
+        </div>
+
+        <section class="panel-section">
+          <h2>Character face</h2>
+          <label class="toggle-row">
+            <input type="checkbox" id="face-overlay-toggle" checked />
+            <span>Overlay model face on my face</span>
+          </label>
+          <div>
+            <div class="field-label">VRM model</div>
+            <select id="model-select" class="field"></select>
+            <a href="models.html" class="btn" style="margin-top:8px;width:100%;">Manage models</a>
+            <a href="index.html" class="btn" style="margin-top:6px;width:100%;">Open main avatar (test model there)</a>
+          </div>
+
+          <div>
+            <div class="field-label">On camera</div>
+            <div id="model-load-badge" class="load-badge pending">Loading character…</div>
+            <p style="font-size:11px;color:var(--text-dim);margin-top:6px;">
+              VRM face on the <strong>large video</strong>. All six pipeline steps above should show ✓ when tracking your face.
+            </p>
+          </div>
+
+          <label class="toggle-row">
+            <input type="checkbox" id="show-full-body" />
+            <span>Show full body (debug only)</span>
+          </label>
+          <div>
+            <div class="field-label">Face size (head only)</div>
+            <div class="row-slider">
+              <input type="range" id="face-scale" class="slider" min="0.25" max="5" step="0.05" value="1.2" />
+              <span id="face-scale-val" style="font-size:12px;min-width:52px;">120%</span>
+            </div>
+            <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">25%–500%. Use a larger value if the head looks too small on camera.</p>
+          </div>
+          <div>
+            <div class="field-label">Body size (0 = hidden)</div>
+            <div class="row-slider">
+              <input type="range" id="body-scale" class="slider" min="0" max="1" step="0.05" value="0" />
+              <span id="body-scale-val" style="font-size:12px;min-width:44px;">Hidden</span>
+            </div>
+            <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">Default is 0 (face only). Increase to show torso/outfit under the face — does not change face size.</p>
+          </div>
+          <div>
+            <div class="field-label">Initial position — left / right</div>
+            <div class="row-slider">
+              <input type="range" id="offset-x" class="slider" min="-400" max="400" step="2" value="0" />
+              <span id="offset-x-val" style="font-size:12px;min-width:44px;">0</span>
+            </div>
+          </div>
+          <div>
+            <div class="field-label">Initial position — up / down</div>
+            <div class="row-slider">
+              <input type="range" id="offset-y" class="slider" min="-400" max="400" step="2" value="0" />
+              <span id="offset-y-val" style="font-size:12px;min-width:44px;">0</span>
+            </div>
+            <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">Range ±400 (fine steps). Head stays inside the video frame — extreme values are clamped.</p>
+          </div>
+          <div class="head-coord-panel" id="head-coord-panel">
+            <div class="field-label">Head coordinates (live)</div>
+            <p style="font-size:11px;color:var(--text-dim);margin:4px 0 6px;">
+              Match <strong>camera</strong> and <strong>model</strong> X/Y — center is 0. Error near 0 means good alignment.
+            </p>
+            <pre id="head-coord-lines" class="head-coord-lines">Waiting for face…</pre>
+            <button type="button" id="btn-match-head-coords" class="btn block" style="margin-top:6px;">
+              Match initial position to camera
+            </button>
+          </div>
+          <div>
+            <div class="field-label">Face direction (°) — fix back of head</div>
+            <div class="row-slider">
+              <input type="range" id="offset-rot-y" class="slider" min="-180" max="180" step="5" value="0" />
+              <span id="offset-rot-y-val" style="font-size:12px;min-width:40px;">0°</span>
+            </div>
+            <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">Set starting pose, then tracking continues. Try <strong>180°</strong> if the face points away from you.</p>
+            <button type="button" id="btn-offset-reset" class="btn block" style="margin-top:6px;">Reset initial position</button>
+          </div>
+          <div>
+            <div class="field-label">Face follow — left/right &amp; up/down</div>
+            <div class="row-slider">
+              <input type="range" id="face-align" class="slider" min="0.35" max="1" step="0.05" value="0.85" />
+              <span id="face-align-val" style="font-size:12px;min-width:36px;">85%</span>
+            </div>
+            <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">How tightly the face sticks to your head (left/right, up/down). Use 90–100% if it lags or sits in the wrong place.</p>
+          </div>
+          <p id="tracking-status">Initializing tracking…</p>
+        </section>
+        <div class="timer" data-rec-timer>00:00</div>
+        <p id="status-line">Starting camera…</p>
+
+        <div class="controls">
+          <button type="button" id="btn-record" class="btn primary block">● Record</button>
+          <button type="button" id="btn-pause" class="btn warn block" hidden>⏸ Pause</button>
+          <button type="button" id="btn-resume" class="btn primary block" hidden>▶ Resume</button>
+          <button type="button" id="btn-stop" class="btn danger block" disabled>■ Stop</button>
+          <button type="button" id="btn-download" class="btn block" disabled>↓ Download video</button>
+          <button type="button" id="btn-new" class="btn block" disabled>New recording</button>
+        </div>
+
+        <label class="toggle-row">
+          <input type="checkbox" id="mirror-toggle" checked />
+          <span>Mirror preview (selfie view)</span>
+        </label>
+        <div style="margin-top:8px;">
+          <div class="field-label">Tracking direction</div>
+          <p style="font-size:11px;color:var(--text-dim);margin:4px 0 8px;">
+            Toggle each if that motion feels reversed on your camera.
+          </p>
+          <label class="toggle-row">
+            <input type="checkbox" id="reverse-head-position" />
+            <span>Reverse head position</span>
+          </label>
+          <p style="font-size:11px;color:var(--text-dim);margin:-4px 0 6px 0;">
+            Left/right and up/down follow on screen (when you move, the head moves the wrong way).
+          </p>
+          <label class="toggle-row">
+            <input type="checkbox" id="reverse-head-rotation" />
+            <span>Reverse head rotation</span>
+          </label>
+          <p style="font-size:11px;color:var(--text-dim);margin:-4px 0 6px 0;">
+            Head turn and tilt (yaw / pitch) opposite to your movement.
+          </p>
+          <label class="toggle-row">
+            <input type="checkbox" id="reverse-face-motion" />
+            <span>Reverse face motion</span>
+          </label>
+          <p style="font-size:11px;color:var(--text-dim);margin:-4px 0 0 0;">
+            Mouth, eyes, and expressions (open/close, smile, brows) opposite to your face.
+          </p>
+        </div>
+        <label class="toggle-row">
+          <input type="checkbox" id="include-audio" checked />
+          <span>Include microphone</span>
+        </label>
+      </aside>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/holistic.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/kalidokit@1.1/dist/kalidokit.umd.js"></script>
+    <script type="module" src="js/recordPage.js"></script>
+  </body>
+</html>

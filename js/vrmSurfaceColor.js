@@ -92,3 +92,9 @@ export function applyModelSurfaceFromSettings(vrm, settings) {
     color: cfg.color || '#e8c4a8',
   });
 }
+
+/** Record overlay: always use the VRM’s original material colors. */
+export function clearRecordSurfaceTint(vrm) {
+  if (!vrm?.scene) return;
+  tintMeshMaterials(vrm.scene, false, '#ffffff');
+}

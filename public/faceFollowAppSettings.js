@@ -1,0 +1,95 @@
+/**
+ * Reads the same sensitivity / enable flags as js/settingsStore.js (Settings page).
+ */
+const SETTINGS_KEY = 'edge_ai_settings_v1';
+
+const DEFAULTS = {
+  sensitivity: {
+    mouth: 1,
+    eyes: 1,
+    expressions: 1,
+    audioLipSync: 1.8,
+  },
+  enabled: {
+    mouth: true,
+    eyes: true,
+    expressions: true,
+    audioLipSync: true,
+  },
+};
+
+function deepMerge(target, source) {
+  if (!source || typeof source !== 'object') return target;
+  for (const k of Object.keys(source)) {
+    const sv = source[k];
+    if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
+      target[k] = deepMerge(
+        target[k] && typeof target[k] === 'object' ? target[k] : {},
+        sv
+      );
+    } else {
+      target[k] = sv;
+    }
+  }
+  return target;
+}
+
+export function loadAppSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
+    return deepMerge(JSON.parse(JSON.stringify(DEFAULTS)), JSON.parse(raw));
+  } catch {
+    return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+}
+
+/** Face / mouth / audio lip-sync multipliers from Settings → Face sensitivity. */
+export function getAppExpressionSensitivities() {
+  const s = loadAppSettings();
+  const sens = s.sensitivity || {};
+  const en = s.enabled || {};
+  const mouth = Number(sens.mouth) || 1;
+  const audioBoost =
+    en.audioLipSync !== false ? Number(sens.audioLipSync) || 1.8 : 1;
+  return {
+    faceIntensity: Number(sens.expressions) || 1,
+    eyesIntensity: Number(sens.eyes) || 1,
+    mouthIntensity: mouth,
+    audioLipSyncMultiplier: audioBoost * mouth,
+    expressionsEnabled: en.expressions !== false,
+    eyesEnabled: en.eyes !== false,
+    mouthEnabled: en.mouth !== false,
+    audioLipSyncEnabled: en.audioLipSync !== false,
+  };
+}
+
+/** Per-viseme toggles derived from Settings (replaces face-follow expression panel). */
+export function buildExprSettingsFromApp(app) {
+  const mouthKeys = ['aa', 'ih', 'ou', 'ee', 'oh'];
+  const eyeKeys = [
+    'blinkLeft',
+    'blinkRight',
+    'blink',
+    'lookUp',
+    'lookDown',
+    'lookLeft',
+    'lookRight',
+  ];
+  const emotionKeys = ['happy', 'sad', 'angry', 'surprised', 'relaxed', 'neutral'];
+  const out = {};
+  const on = (key, enabled, amount = 1) => {
+    out[key] = { enabled: enabled !== false, amount };
+  };
+  for (const k of mouthKeys) on(k, app.mouthEnabled, app.mouthIntensity);
+  for (const k of eyeKeys) on(k, app.eyesEnabled, app.eyesIntensity);
+  for (const k of emotionKeys) on(k, app.expressionsEnabled, app.faceIntensity);
+  return out;
+}
+
+/** Higher = snappier face tracking (inverse of Settings smoothing.face). */
+export function getFaceTrackingLerp() {
+  const smooth = Number(loadAppSettings().smoothing?.face);
+  const s = Number.isFinite(smooth) ? smooth : 0.22;
+  return Math.max(0.62, Math.min(0.92, 1 - s * 0.55));
+}

@@ -27,7 +27,7 @@ const VIDEO_ONLY_MIME_TYPES = [
   'video/webm',
 ];
 
-function extensionFor(mimeType) {
+export function extensionFor(mimeType) {
   if (!mimeType) return 'webm';
   if (mimeType.includes('mp4')) return 'mp4';
   return 'webm';

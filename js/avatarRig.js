@@ -85,6 +85,11 @@ export class AvatarRig {
       y: applyDeadZone(rotation.y),
       z: applyDeadZone(rotation.z),
     };
+    if (this.settings.trackingReverse?.headRotation) {
+      filteredRotation.x *= -1;
+      filteredRotation.y *= -1;
+      filteredRotation.z *= -1;
+    }
 
     const euler = new THREE.Euler(
       filteredRotation.x * dampener,
@@ -150,9 +155,15 @@ export class AvatarRig {
     const PresetName = THREE_VRM.VRMSchema.BlendShapePresetName;
     if (!Blendshape) return;
 
+    const invFace = this.settings.trackingReverse?.faceMotion === true;
+
     if (enabled.eyes) {
-      const leftBlink = clamp01((1 - riggedFace.eye.l) * sensitivity.eyes);
-      const rightBlink = clamp01((1 - riggedFace.eye.r) * sensitivity.eyes);
+      const leftBlink = clamp01(
+        (invFace ? riggedFace.eye.l : 1 - riggedFace.eye.l) * sensitivity.eyes
+      );
+      const rightBlink = clamp01(
+        (invFace ? riggedFace.eye.r : 1 - riggedFace.eye.r) * sensitivity.eyes
+      );
       Blendshape.setValue(PresetName.BlinkL, leftBlink);
       Blendshape.setValue(PresetName.BlinkR, rightBlink);
     } else {
@@ -179,17 +190,35 @@ export class AvatarRig {
       });
       // While audio is driving the mouth, KEEP smile / surprise / sorrow
       // face-driven so the user's real facial expression still comes through.
-      this._applyExpressionBlendshapes(Blendshape, PresetName, riggedFace, sensitivity, enabled, mouthLerp);
+      this._applyExpressionBlendshapes(
+        Blendshape,
+        PresetName,
+        riggedFace,
+        sensitivity,
+        enabled,
+        mouthLerp,
+        invFace
+      );
     } else if (enabled.mouth) {
       const ms = sensitivity.mouth;
       MOUTH_SHAPES.forEach((shape) => {
-        const target = clamp01((riggedFace.mouth.shape[shape] || 0) * ms);
+        let raw = riggedFace.mouth.shape[shape] || 0;
+        if (invFace) raw = 1 - raw;
+        const target = clamp01(raw * ms);
         Blendshape.setValue(
           PresetName[shape],
           lerp(Blendshape.getValue(PresetName[shape]) || 0, target, mouthLerp)
         );
       });
-      this._applyExpressionBlendshapes(Blendshape, PresetName, riggedFace, sensitivity, enabled, mouthLerp);
+      this._applyExpressionBlendshapes(
+        Blendshape,
+        PresetName,
+        riggedFace,
+        sensitivity,
+        enabled,
+        mouthLerp,
+        invFace
+      );
     } else {
       MOUTH_SHAPES.forEach((shape) => Blendshape.setValue(PresetName[shape], 0));
       Blendshape.setValue(PresetName.Joy, 0);
@@ -199,9 +228,11 @@ export class AvatarRig {
 
     if (enabled.pupils && this.vrm.lookAt) {
       const ps = sensitivity.pupils;
+      const px = (riggedFace.pupil.x || 0) * (invFace ? -1 : 1);
+      const py = (riggedFace.pupil.y || 0) * (invFace ? -1 : 1);
       const lookTarget = new THREE.Euler(
-        lerp(this.oldLookTarget.x, (riggedFace.pupil.y || 0) * ps, 0.4),
-        lerp(this.oldLookTarget.y, (riggedFace.pupil.x || 0) * ps, 0.4),
+        lerp(this.oldLookTarget.x, py * ps, 0.4),
+        lerp(this.oldLookTarget.y, px * ps, 0.4),
         0,
         'XYZ'
       );
@@ -447,7 +478,15 @@ export class AvatarRig {
    * These are kept separate from the mouth-shape pipeline so they can run
    * even while audio lip-sync is overriding the visemes.
    */
-  _applyExpressionBlendshapes(Blendshape, PresetName, riggedFace, sensitivity, enabled, lerpAmt) {
+  _applyExpressionBlendshapes(
+    Blendshape,
+    PresetName,
+    riggedFace,
+    sensitivity,
+    enabled,
+    lerpAmt,
+    invert = false
+  ) {
     const lerp = Kalidokit.Vector.lerp;
     const expEnabled = enabled.expressions !== false;
     const exp = expEnabled ? (sensitivity.expressions ?? 1.0) : 0;
@@ -457,7 +496,8 @@ export class AvatarRig {
     // landmark-derived smile cue (mouth corners pulled up).
     const kalidoSmile = (riggedFace?.mouth?.shape?.I || 0) * 0.7;
     const landmarkSmile = extras.smile || 0;
-    const smileAmount = clamp01(Math.max(kalidoSmile, landmarkSmile) * exp);
+    let smileAmount = clamp01(Math.max(kalidoSmile, landmarkSmile) * exp);
+    if (invert) smileAmount = clamp01(1 - smileAmount);
     Blendshape.setValue(
       PresetName.Joy,
       lerp(Blendshape.getValue(PresetName.Joy) || 0, smileAmount, lerpAmt)
@@ -466,7 +506,8 @@ export class AvatarRig {
     // Brow raise → Fun (surprised look). Many VRMs map Fun to "raised brows
     // / wide eyes". Falls back gracefully if the preset is missing.
     try {
-      const browAmt = clamp01((extras.browRaise || 0) * exp);
+      let browAmt = clamp01((extras.browRaise || 0) * exp);
+      if (invert) browAmt = clamp01(1 - browAmt);
       Blendshape.setValue(
         PresetName.Fun,
         lerp(Blendshape.getValue(PresetName.Fun) || 0, browAmt, lerpAmt)
@@ -475,7 +516,8 @@ export class AvatarRig {
 
     // Frown → Sorrow.
     try {
-      const sorrow = clamp01((extras.frown || 0) * exp);
+      let sorrow = clamp01((extras.frown || 0) * exp);
+      if (invert) sorrow = clamp01(1 - sorrow);
       Blendshape.setValue(
         PresetName.Sorrow,
         lerp(Blendshape.getValue(PresetName.Sorrow) || 0, sorrow, lerpAmt)

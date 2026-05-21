@@ -2,6 +2,7 @@
 // Loads and configures VRM avatars from a URL or a Blob (uploaded file).
 
 import { Config } from './config.js';
+import { resolveAssetUrl } from './assetUrl.js';
 
 export class VRMLoader {
   constructor(scene, onProgress) {
@@ -121,12 +122,12 @@ float punctualLightIntensityToIrradianceFactor( const in float lightDistance, co
         return { url, cleanup: () => {} };
       }
       if (source.type === 'url' && typeof source.value === 'string') {
-        return { url: source.value, cleanup: null };
+        return { url: resolveAssetUrl(source.value), cleanup: null };
       }
     }
     if (typeof source === 'string' && source.length > 0) {
-      return { url: source, cleanup: null };
+      return { url: resolveAssetUrl(source), cleanup: null };
     }
-    return { url: Config.vrmUrl, cleanup: null };
+    return { url: resolveAssetUrl(Config.vrmUrl), cleanup: null };
   }
 }
