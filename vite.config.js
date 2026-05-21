@@ -30,6 +30,8 @@ export default defineConfig({
         models: resolve(__dirname, 'models.html'),
         settings: resolve(__dirname, 'settings.html'),
         cameras: resolve(__dirname, 'cameras.html'),
+        faceFollow: resolve(__dirname, 'face-follow.html'),
+        faceFollowMindar: resolve(__dirname, 'public/faceFollowMindar.js'),
       },
       output: {
         entryFileNames: 'assets/app.[hash].js',
