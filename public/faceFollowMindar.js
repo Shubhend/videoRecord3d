@@ -1152,6 +1152,7 @@ async function startTracking() {
   syncVideoFeed();
   mindarThree.video?.play?.().catch(() => {});
   background?.refresh();
+  requestAnimationFrame(() => background?.refresh());
 
   running = true;
   renderer.setAnimationLoop(onLoop);
@@ -1197,6 +1198,8 @@ async function loadModelFace() {
     setBodyPartsUnlocked(true);
     setFaceMeshStyle(showMeshInput?.checked === true);
     updateFaceShellVisibility();
+    background?.refresh();
+    requestAnimationFrame(() => background?.refresh());
 
     setStatus('<strong>Step 2 OK:</strong> Model on anchor — enter values below', true);
     const exprCount = avatar.vrmExprNames?.size ?? 0;
@@ -1361,6 +1364,7 @@ function bindExtendedUi() {
       console.error(err);
       if (statusEl) statusEl.textContent = `Screen: ${err.message}`;
       background?.stopScreenShare?.();
+      background?.setConfig?.({ mode: 'camera' });
       if ($('bg-mode')) $('bg-mode').value = 'camera';
       updateBgScreenUi();
     }

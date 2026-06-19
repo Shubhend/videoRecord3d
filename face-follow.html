@@ -25,15 +25,45 @@
         background: transparent;
       }
       /* Stack: custom bg (0) → live camera / you (1) → 3D avatar overlay (2) */
-      #container video {
+      /* Default: camera fills the full view (square PiP only during screen share) */
+      #container:not(.screen-share-mode) video:not(.bg-image-layer) {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: cover !important;
         z-index: 1 !important;
-        object-fit: cover;
-        position: relative;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
       }
       #container canvas {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
         z-index: 2 !important;
         pointer-events: none;
         background: transparent !important;
+      }
+      /* Google Meet layout: shared screen full, camera + avatar in PiP tile */
+      #container.screen-share-mode canvas {
+        position: absolute !important;
+        width: min(22vw, 200px) !important;
+        height: min(22vw, 200px) !important;
+        right: 12px !important;
+        bottom: 12px !important;
+        left: auto !important;
+        top: auto !important;
+        z-index: 4 !important;
+        border-radius: 8px;
+        overflow: hidden;
+        pointer-events: none;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+      }
+      #container.screen-share-mode video.bg-image-layer {
+        object-fit: contain !important;
+        background: #0a0e14;
       }
       #control {
         position: fixed;
@@ -71,6 +101,23 @@
         height: 100%;
         object-fit: cover;
         pointer-events: none;
+      }
+      /* Screen share: full screen behind, camera PiP bottom-right */
+      #container.screen-share-mode video:not(.bg-image-layer) {
+        position: absolute !important;
+        width: min(22vw, 200px) !important;
+        height: min(22vw, 200px) !important;
+        right: 12px !important;
+        bottom: 12px !important;
+        left: auto !important;
+        top: auto !important;
+        object-fit: cover !important;
+        border-radius: 8px;
+        border: 2px solid #2a3544;
+        z-index: 3 !important;
+        transform: scaleX(-1) !important;
+        filter: none !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
       }
       .btn-row {
         display: grid;

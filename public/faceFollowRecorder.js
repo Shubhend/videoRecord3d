@@ -38,6 +38,7 @@ export class FaceRecorder {
 
     const cfg = background?.config || { mode: 'camera' };
     const hideCamera = background?.shouldShowCamera?.() === false;
+    const screenPip = background?.isScreenPipMode?.() === true;
     const customBg = hideCamera || cfg.mode === 'color' || cfg.mode === 'image' || cfg.mode === 'screen';
 
     if (customBg) {
@@ -47,7 +48,9 @@ export class FaceRecorder {
       ctx.fillRect(0, 0, w, h);
     }
 
-    if (!hideCamera && video?.videoWidth > 0) {
+    if (screenPip && video?.videoWidth > 0) {
+      background.drawCameraPip(ctx, video, w, h);
+    } else if (!hideCamera && video?.videoWidth > 0) {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       const scale = Math.max(w / vw, h / vh);
@@ -66,7 +69,10 @@ export class FaceRecorder {
       ctx.filter = 'none';
     }
 
-    if (glCanvas?.width > 0) {
+    /* Screen share: avatar on top of camera PiP tile */
+    if (screenPip && glCanvas?.width > 0) {
+      background.drawGlCanvasPip(ctx, glCanvas, w, h);
+    } else if (!screenPip && glCanvas?.width > 0) {
       const cw = glCanvas.width;
       const ch = glCanvas.height;
       const scale = Math.max(w / cw, h / ch);
