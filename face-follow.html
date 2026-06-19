@@ -247,6 +247,7 @@
           <option value="blur">Camera blur</option>
           <option value="color">Solid color</option>
           <option value="image">Image</option>
+          <option value="screen">Screen share</option>
         </select>
         <div class="num-row">
           <label for="bg-blur">Blur (px)</label>
@@ -258,6 +259,11 @@
         </div>
         <input type="file" id="bg-image-file" accept="image/*" />
         <button type="button" id="bg-clear-image" class="secondary">Clear image</button>
+        <div class="btn-row" style="margin-top:6px;">
+          <button type="button" id="bg-screen-start" class="secondary">Start screen share</button>
+          <button type="button" id="bg-screen-stop" class="secondary" disabled>Stop screen share</button>
+        </div>
+        <p id="bg-screen-status" style="margin:4px 0 0;font-size:10px;color:#9aa8b8;">Screen: off</p>
       </div>
 
       <div id="audio-panel" class="panel">

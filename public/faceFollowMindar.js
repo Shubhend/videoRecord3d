@@ -1125,6 +1125,14 @@ async function setup() {
 
   if (!background) background = new FaceBackground(container);
   else background.apply();
+  if (background && !background.onScreenShareChange) {
+    background.onScreenShareChange = () => {
+      updateBgScreenUi();
+      if ($('bg-mode') && background.config) {
+        $('bg-mode').value = background.config.mode;
+      }
+    };
+  }
 
   if (!faceRecorder) faceRecorder = new FaceRecorder();
 
@@ -1234,6 +1242,7 @@ async function stopAll() {
     });
   }
   audioLip?.stop();
+  background?.stopScreenShare?.();
   container.innerHTML = '';
   background = null;
   _bgImageEl = null;
@@ -1268,18 +1277,49 @@ async function initModelDropdown() {
   });
 }
 
+function updateBgScreenUi() {
+  const active = background?.isScreenActive?.() === true;
+  const startBtn = $('bg-screen-start');
+  const stopBtn = $('bg-screen-stop');
+  const statusEl = $('bg-screen-status');
+  if (startBtn) startBtn.disabled = active;
+  if (stopBtn) stopBtn.disabled = !active;
+  if (statusEl) statusEl.textContent = active ? 'Screen: sharing' : 'Screen: off';
+  if ($('bg-mode') && active) $('bg-mode').value = 'screen';
+}
+
 function bindExtendedUi() {
   if (!audioLip) audioLip = new AudioLipSync();
   if (!background && container) background = new FaceBackground(container);
+  if (background) {
+    background.onScreenShareChange = () => {
+      updateBgScreenUi();
+      if ($('bg-mode') && background.config) {
+        $('bg-mode').value = background.config.mode;
+      }
+    };
+  }
   initModelDropdown().catch(console.error);
 
   $('bg-mode')?.addEventListener('change', () => {
-    background?.setConfig({ mode: $('bg-mode').value });
+    const mode = $('bg-mode').value;
+    if (mode === 'screen') {
+      if (!background?.isScreenActive?.()) {
+        $('bg-screen-start')?.click();
+        return;
+      }
+    } else {
+      background?.stopScreenShare?.();
+      updateBgScreenUi();
+    }
+    background?.setConfig({ mode });
     _bgImageEl = background?.getImageElement() ?? null;
     faceRecorder?.setBackdropImage(_bgImageEl);
     background?.refresh();
   });
   $('bg-color')?.addEventListener('input', () => {
+    background?.stopScreenShare?.();
+    updateBgScreenUi();
     background?.setConfig({ mode: 'color', color: $('bg-color').value });
     if ($('bg-mode')) $('bg-mode').value = 'color';
   });
@@ -1290,6 +1330,8 @@ function bindExtendedUi() {
   $('bg-image-file')?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (!file || !background) return;
+    background.stopScreenShare?.();
+    updateBgScreenUi();
     background.setImageFile(file);
     if ($('bg-mode')) $('bg-mode').value = 'image';
     const syncBg = () => {
@@ -1307,10 +1349,33 @@ function bindExtendedUi() {
     if ($('bg-mode')) $('bg-mode').value = 'camera';
     background?.refresh();
   });
+  $('bg-screen-start')?.addEventListener('click', async () => {
+    const statusEl = $('bg-screen-status');
+    try {
+      if (statusEl) statusEl.textContent = 'Screen: requesting…';
+      await background?.startScreenShare?.();
+      if ($('bg-mode')) $('bg-mode').value = 'screen';
+      background?.refresh();
+      updateBgScreenUi();
+    } catch (err) {
+      console.error(err);
+      if (statusEl) statusEl.textContent = `Screen: ${err.message}`;
+      background?.stopScreenShare?.();
+      if ($('bg-mode')) $('bg-mode').value = 'camera';
+      updateBgScreenUi();
+    }
+  });
+  $('bg-screen-stop')?.addEventListener('click', () => {
+    background?.stopScreenShare?.();
+    if ($('bg-mode')) $('bg-mode').value = 'camera';
+    background?.setConfig({ mode: 'camera' });
+    updateBgScreenUi();
+  });
 
   if ($('bg-mode') && background) $('bg-mode').value = background.config.mode;
   if ($('bg-color') && background) $('bg-color').value = background.config.color;
   if ($('bg-blur') && background) $('bg-blur').value = background.config.blurPx;
+  updateBgScreenUi();
 
   $('audio-file')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];

@@ -37,14 +37,17 @@ export class FaceRecorder {
     ctx.clearRect(0, 0, w, h);
 
     const cfg = background?.config || { mode: 'camera' };
-    if (cfg.mode === 'color' || cfg.mode === 'image') {
+    const hideCamera = background?.shouldShowCamera?.() === false;
+    const customBg = hideCamera || cfg.mode === 'color' || cfg.mode === 'image' || cfg.mode === 'screen';
+
+    if (customBg) {
       background?.draw(ctx, w, h);
     } else {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, w, h);
     }
 
-    if (video?.videoWidth > 0) {
+    if (!hideCamera && video?.videoWidth > 0) {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       const scale = Math.max(w / vw, h / vh);
