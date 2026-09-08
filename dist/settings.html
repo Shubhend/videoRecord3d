@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edge AI Avatar — Settings</title>
+    <link rel="icon" href="./assets/B_SY1GJM.ico" type="image/x-icon" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-0: #0a0e1a;
+        --bg-1: #0f1424;
+        --bg-2: #161c30;
+        --accent: #00ff88;
+        --accent-dim: #00b86a;
+        --text: #e7ecf3;
+        --text-dim: #9aa3b2;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.16);
+        --danger: #ff5566;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        min-height: 100%;
+        background: radial-gradient(ellipse at top, #16213e 0%, #0a0e1a 60%, #06080f 100%);
+        color: var(--text);
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        background: linear-gradient(180deg, rgba(10, 14, 26, 0.92), rgba(10, 14, 26, 0.78));
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--border);
+        z-index: 50;
+      }
+      .brand {
+        display: flex; align-items: center; gap: 10px;
+        text-decoration: none; color: var(--text);
+        font-weight: 700; font-size: 15px;
+      }
+      .brand-mark {
+        width: 28px; height: 28px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), #00c2ff);
+        display: flex; align-items: center; justify-content: center;
+        color: #021; font-weight: 800;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.35);
+      }
+      .nav-actions { display: flex; align-items: center; gap: 8px; }
+      .btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 9px 16px; font-size: 13px; font-weight: 600;
+        border-radius: 10px;
+        border: 1px solid var(--border-strong);
+        background: rgba(22, 28, 48, 0.6);
+        color: var(--text);
+        cursor: pointer; text-decoration: none;
+        transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        font-family: inherit;
+      }
+      .btn:hover { background: rgba(30, 38, 64, 0.9); border-color: rgba(0, 255, 136, 0.4); }
+      .btn.primary { background: var(--accent); color: #021; border-color: var(--accent); }
+      .btn.primary:hover { background: #00ffa0; }
+      .btn.danger { color: var(--danger); border-color: rgba(255, 85, 102, 0.35); }
+      .btn.danger:hover { background: rgba(255, 85, 102, 0.12); }
+      .btn:active { transform: translateY(1px); }
+
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 40px 24px 80px;
+      }
+
+      .page-title { font-size: 28px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 6px; }
+      .page-subtitle { color: var(--text-dim); font-size: 14px; margin-bottom: 32px; }
+
+      .panel {
+        background: rgba(15, 20, 36, 0.65);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 22px;
+        margin-bottom: 18px;
+      }
+      .panel-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 16px;
+      }
+      .panel-title { font-size: 15px; font-weight: 700; }
+      .panel-desc { color: var(--text-dim); font-size: 12px; margin-top: 4px; max-width: 60ch; }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 96px;
+        align-items: center;
+        gap: 14px;
+        padding: 14px 0;
+        border-top: 1px solid var(--border);
+      }
+      .row:first-of-type { border-top: none; }
+
+      .row-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .row-label .label-text { line-height: 1.1; }
+      .row-label .label-hint { color: var(--text-dim); font-weight: 400; font-size: 11px; margin-top: 3px; display: block; }
+
+      /* Toggle switch */
+      .switch {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        flex-shrink: 0;
+        cursor: pointer;
+      }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .switch .track {
+        position: absolute; inset: 0;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        transition: background 0.15s;
+        border: 1px solid var(--border);
+      }
+      .switch .thumb {
+        position: absolute;
+        top: 2px; left: 2px;
+        width: 14px; height: 14px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.15s, background 0.15s;
+      }
+      .switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+      .switch input:checked + .track + .thumb { transform: translateX(16px); background: #021; }
+
+      .num-input {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.35);
+        color: var(--text);
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        text-align: right;
+      }
+      .num-input:disabled { opacity: 0.4; cursor: not-allowed; }
+      .num-input.high { color: var(--accent); border-color: rgba(0, 255, 136, 0.35); }
+      .num-input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.15);
+      }
+
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 8px;
+      }
+
+      .toast {
+        position: fixed;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-12px);
+        opacity: 0;
+        background: rgba(15, 20, 36, 0.98);
+        border: 1px solid var(--border-strong);
+        color: var(--text);
+        padding: 10px 16px;
+        border-radius: 10px;
+        font-size: 13px;
+        z-index: 200;
+        pointer-events: none;
+        transition: opacity 0.2s, transform 0.2s;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* Background mode picker */
+      .bg-modes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .bg-option { cursor: pointer; }
+      .bg-option input[type="radio"] {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .bg-option-card {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 10px;
+        background: rgba(22, 28, 48, 0.5);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        transition: border-color 0.15s, background 0.15s;
+        height: 100%;
+      }
+      .bg-option:hover .bg-option-card {
+        border-color: var(--border-strong);
+        background: rgba(30, 38, 64, 0.7);
+      }
+      .bg-option input:checked + .bg-option-card {
+        border-color: var(--accent);
+        background: rgba(0, 255, 136, 0.06);
+        box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.18);
+      }
+      .bg-option-thumb {
+        height: 64px;
+        border-radius: 8px;
+        background: var(--bg-2);
+        background-size: cover;
+        background-position: center;
+        border: 1px solid var(--border);
+      }
+      .bg-option-thumb.default-thumb {
+        background: radial-gradient(ellipse at top, #16213e 0%, #0a0e1a 60%, #06080f 100%);
+        position: relative;
+      }
+      .bg-option-thumb.default-thumb::after {
+        content: '';
+        position: absolute; left: 14px; top: 8px;
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        background: #fdfbd3;
+        box-shadow: 0 0 8px rgba(253, 251, 211, 0.6);
+      }
+      .bg-option-thumb.image-thumb {
+        display: flex; align-items: center; justify-content: center;
+        font-size: 20px; color: var(--text-dim);
+      }
+      .bg-option-label { font-weight: 700; font-size: 13px; }
+      .bg-option-hint { font-size: 11px; color: var(--text-dim); }
+      .bg-option-hint input[type="color"] {
+        width: 100%;
+        height: 22px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .bg-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+        flex-wrap: wrap;
+      }
+
+      .scene-ground-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-top: 16px;
+        padding: 12px 14px;
+        background: rgba(22, 28, 48, 0.45);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 13px;
+        line-height: 1.45;
+        cursor: pointer;
+      }
+      .scene-ground-row input { margin-top: 3px; flex-shrink: 0; cursor: pointer; }
+      .scene-ground-row strong { display: block; margin-bottom: 2px; }
+
+      .model-surface-color-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+        padding: 12px 14px;
+        background: rgba(22, 28, 48, 0.45);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      .model-surface-color-row label { font-weight: 600; min-width: 88px; }
+      .model-surface-color-row input[type="color"] {
+        width: 56px;
+        height: 36px;
+        padding: 2px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .model-surface-swatch {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--border-strong);
+        margin-left: auto;
+      }
+
+      .placement-modes {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .placement-option { cursor: pointer; }
+      .placement-option input { position: absolute; opacity: 0; pointer-events: none; }
+      .placement-option-card {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(22, 28, 48, 0.45);
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .placement-option input:checked + .placement-option-card {
+        border-color: var(--accent);
+        background: rgba(0, 255, 136, 0.08);
+        box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.18);
+      }
+      .placement-option-card:hover { border-color: rgba(0, 255, 136, 0.35); }
+      .placement-option-label { font-weight: 700; font-size: 13px; }
+      .placement-option-hint { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+
+      @media (max-width: 640px) {
+        .bg-modes { grid-template-columns: 1fr; }
+        main { padding: 24px 16px 60px; }
+        .page-title { font-size: 22px; }
+        .row { grid-template-columns: 1fr 88px; gap: 10px; }
+        .topbar { padding: 0 12px; }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/app.DJPrllgO.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/DdH9JgaZ.js">
+    <link rel="modulepreload" crossorigin href="./assets/D7TFeGR_.js">
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="index.html" class="brand">
+        <span class="brand-mark">EA</span>
+        <span>Edge AI Avatar</span>
+      </a>
+      <div class="nav-actions">
+        <a href="models.html" class="btn">Models</a>
+        <a href="record.html" class="btn">Webcam Record</a>
+        <a href="cameras.html" class="btn">Camera Views</a>
+        <a href="index.html" class="btn">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M9 2.5l-4.5 4.5L9 11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Back to Live
+        </a>
+      </div>
+    </header>
+
+    <main>
+      <h1 class="page-title">Settings</h1>
+      <p class="page-subtitle">
+        Tune how your movement maps onto the avatar. Changes save automatically and apply
+        live if the live page is open in another tab.
+      </p>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Tracking stability</div>
+            <div class="panel-desc">Reduce flicker on arms, hands, and face. Reload the live page after changing camera resolution.</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label">
+            <div>
+              <span class="label-text">Model quality</span>
+              <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">Higher = more accurate pose and hands, more CPU.</span>
+            </div>
+          </div>
+          <select id="tm-model-complexity" class="btn" style="min-width:120px;">
+            <option value="0">Fast (lite)</option>
+            <option value="1" selected>Balanced</option>
+            <option value="2">Accurate (heavy)</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Camera</span></div>
+          <select id="tm-camera-res" class="btn" style="min-width:120px;">
+            <option value="640">640×480</option>
+            <option value="1280">1280×720 (HD)</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Body stabilization</span><span class="label-hint">0.2 – 0.9</span></div>
+          <input type="number" id="tm-pose-stab" min="0.2" max="0.9" step="0.01" value="0.62" class="num-input" />
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Hand stabilization</span><span class="label-hint">0.2 – 0.9</span></div>
+          <input type="number" id="tm-hand-stab" min="0.2" max="0.9" step="0.01" value="0.58" class="num-input" />
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Face stabilization</span><span class="label-hint">0.2 – 0.9</span></div>
+          <input type="number" id="tm-face-stab" min="0.2" max="0.9" step="0.01" value="0.48" class="num-input" />
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Hold on brief loss (ms)</span><span class="label-hint">150 – 800</span></div>
+          <input type="number" id="tm-hold-ms" min="150" max="800" step="1" value="380" class="num-input" />
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Detection confidence</span><span class="label-hint">0.5 – 0.95</span></div>
+          <input type="number" id="tm-det-conf" min="0.5" max="0.95" step="0.01" value="0.72" class="num-input" />
+        </div>
+        <div class="row">
+          <div class="row-label"><span class="label-text">Tracking confidence</span><span class="label-hint">0.5 – 0.95</span></div>
+          <input type="number" id="tm-trk-conf" min="0.5" max="0.95" step="0.01" value="0.72" class="num-input" />
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Face &amp; Head</div>
+            <div class="panel-desc">Head rotation, blink intensity, mouth shapes, and eye look-at.</div>
+          </div>
+        </div>
+        <div id="rows-face"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Body</div>
+            <div class="panel-desc">Spine, arms, and lower body. Lower body uses heavier smoothing because leg landmarks are noisier when the user is partly out of frame.</div>
+          </div>
+        </div>
+        <div id="rows-body"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Hands</div>
+            <div class="panel-desc">Wrist orientation and individual finger joints.</div>
+          </div>
+        </div>
+        <div id="rows-hands"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Presence &amp; Distance</div>
+            <div class="panel-desc">Move the avatar in 3D space based on how close you are to the webcam.</div>
+          </div>
+        </div>
+        <div id="rows-presence"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Smoothing &amp; Recovery</div>
+            <div class="panel-desc">How the avatar behaves when tracking signal is briefly lost or noisy.</div>
+          </div>
+        </div>
+        <div id="rows-smoothing"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Recording camera</div>
+            <div class="panel-desc">
+              Save camera angles on the
+              <a href="cameras.html" style="color:var(--accent);">Camera Views</a> page (frame the face with the mouse).
+              During recording or audio playback, the app switches between your saved views at random.
+            </div>
+          </div>
+        </div>
+        <label for="cam-change-mode" style="display:block;margin:12px 0 6px;font-size:12px;font-weight:600;">Angle change during recording</label>
+        <select id="cam-change-mode" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-strong);background:rgba(22,28,48,0.8);color:var(--text);font-family:inherit;font-size:13px;margin-bottom:12px;">
+          <option value="random">Random — switch between saved views</option>
+          <option value="hold">Hold — one random view, no cuts</option>
+        </select>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-enabled" checked />
+          <span>
+            <strong>Use saved camera views</strong>
+            <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">When off, you keep manual mouse control during record/audio.</span>
+          </span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-auto-audio" checked />
+          <span><strong>During audio playback &amp; Play &amp; Record</strong></span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-auto-record" checked />
+          <span><strong>While canvas recording (no audio)</strong></span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-auto-live" />
+          <span><strong>Always on live page</strong><span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">Slower, subtle moves when idle.</span></span>
+        </label>
+        <label class="scene-ground-row" style="cursor:pointer;">
+          <input type="checkbox" id="cam-speech-cuts" checked />
+          <span><strong>Cut on speech pauses</strong><span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">New angle after a brief silence (paragraph feel).</span></span>
+        </label>
+        <p style="margin-top:12px;"><a href="cameras.html" class="btn" style="display:inline-flex;">Open Camera Views →</a></p>
+        <div id="rows-camera"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Character position</div>
+            <div class="panel-desc">Place the avatar on the floor. North is toward the back of the scene; south is toward the camera; east is to the right.</div>
+          </div>
+        </div>
+        <div class="placement-modes" id="placement-modes" role="radiogroup" aria-label="Character placement"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Avatar surface</div>
+            <div class="panel-desc">Tint the 3D model. The color multiplies with each part’s original shading so textures stay visible.</div>
+          </div>
+        </div>
+        <label class="scene-ground-row">
+          <input type="checkbox" id="model-surface-enabled" />
+          <span>
+            <strong>Custom surface color</strong>
+            <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">When off, the model uses its original colors from the file.</span>
+          </span>
+        </label>
+        <div class="model-surface-color-row">
+          <label for="model-surface-color">Surface color</label>
+          <input type="color" id="model-surface-color" value="#e8c4a8" />
+          <span class="model-surface-swatch" id="model-surface-swatch" aria-hidden="true"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Background</div>
+            <div class="panel-desc">Choose a backdrop for the live scene. Image &amp; color hide the procedural stars and moon.</div>
+          </div>
+        </div>
+        <div class="bg-modes" role="radiogroup" aria-label="Background mode">
+          <label class="bg-option">
+            <input type="radio" name="bg-mode" value="default" />
+            <span class="bg-option-card">
+              <span class="bg-option-thumb default-thumb"></span>
+              <span class="bg-option-label">Default</span>
+              <span class="bg-option-hint">Stars &amp; moon</span>
+            </span>
+          </label>
+          <label class="bg-option">
+            <input type="radio" name="bg-mode" value="color" />
+            <span class="bg-option-card">
+              <span class="bg-option-thumb" id="bg-color-thumb"></span>
+              <span class="bg-option-label">Solid Color</span>
+              <span class="bg-option-hint">
+                <input type="color" id="bg-color-input" value="#0a0e1a" />
+              </span>
+            </span>
+          </label>
+          <label class="bg-option">
+            <input type="radio" name="bg-mode" value="image" />
+            <span class="bg-option-card">
+              <span class="bg-option-thumb image-thumb" id="bg-image-thumb"></span>
+              <span class="bg-option-label">Image</span>
+              <span class="bg-option-hint" id="bg-image-status">No image uploaded</span>
+            </span>
+          </label>
+        </div>
+        <div class="bg-actions">
+          <button id="bg-upload" class="btn">Upload Image</button>
+          <button id="bg-clear" class="btn danger">Remove Image</button>
+          <input id="bg-file-input" type="file" accept="image/*" hidden />
+        </div>
+        <label class="scene-ground-row">
+          <input type="checkbox" id="show-ground" checked />
+          <span>
+            <strong>Show ground surface</strong>
+            <span class="label-hint" style="display:block;color:var(--text-dim);font-size:12px;">Turn off to hide the floor plane, grid lines, and shadow-catching ground on the live page.</span>
+          </span>
+        </label>
+        <div class="model-surface-color-row" style="margin-top:12px;">
+          <label for="floor-color">Floor color</label>
+          <input type="color" id="floor-color" value="#555555" />
+          <span class="model-surface-swatch" id="floor-color-swatch" aria-hidden="true"></span>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="reset" class="btn danger">Reset to Defaults</button>
+        <a href="index.html" class="btn primary">Apply &amp; Open Live</a>
+      </div>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+  </body>
+</html>

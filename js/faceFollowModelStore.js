@@ -24,13 +24,16 @@ export const FACE_GLB_MODEL = Object.freeze({
 
 const BUILT_INS = [DEFAULT_MODEL, FACE_GLB_MODEL];
 
-const SCRIPT_BASE = new URL('.', import.meta.url);
-
 export function resolveAssetUrl(path) {
   if (!path || typeof path !== 'string') return path;
   if (/^(https?:|blob:|data:)/i.test(path)) return path;
   const rel = path.replace(/^\//, '');
-  return new URL(rel, SCRIPT_BASE).href;
+  try {
+    const base = (typeof document !== 'undefined' && document.baseURI) || (typeof location !== 'undefined' ? location.href : '/');
+    return new URL(rel, base).href;
+  } catch {
+    return rel;
+  }
 }
 
 let _dbPromise = null;
