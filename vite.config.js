@@ -2,10 +2,7 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
-  base: '/edge_ai/',
-  server: {
-    allowedHosts: ['video.lovetoreads.com']
-  },
+  base: './',
   resolve: {
     alias: {
       'mindar-face-three': resolve(__dirname, 'node_modules/mind-ar/dist/mindar-face-three.prod.js'),
