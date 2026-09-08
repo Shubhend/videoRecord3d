@@ -36,7 +36,7 @@ export function resolveAssetUrl(path) {
 
 let _dbPromise = null;
 function openDB() {
-  if (_dbPromise) return _dbPromise;
+  if (_dbPromise) return _dbPromise.catch(() => { _dbPromise = null; return openDB(); });
   _dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
@@ -52,7 +52,10 @@ function openDB() {
       }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => {
+      _dbPromise = null;
+      reject(req.error);
+    };
   });
   return _dbPromise;
 }
