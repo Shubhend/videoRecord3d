@@ -15,6 +15,8 @@ import {
   VisibilityGate,
 } from './trackingFilters.js';
 
+const MEDIAPIPE_HOLISTIC_VERSION = '0.5.1635989137';
+
 // MediaPipe Pose landmark indices (https://google.github.io/mediapipe/solutions/pose).
 const LM = {
   leftShoulder: 11, rightShoulder: 12,
@@ -170,15 +172,30 @@ export class Tracking {
 
     if (this.onStatusUpdate) this.onStatusUpdate('Loading face tracker…');
 
-    this.holistic = new Holistic({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${file}`,
-    });
-    
-    this.setSettings(this.settings);
-    this.holistic.onResults((results) => this.processResults(results));
-
-    if (typeof this.holistic.initialize === 'function') {
-      await this.holistic.initialize();
+    const version = MEDIAPIPE_HOLISTIC_VERSION;
+    const cdns = [
+      (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic@${version}/${file}`,
+      (file) => `https://unpkg.com/@mediapipe/holistic@${version}/${file}`,
+    ];
+    let lastErr = null;
+    for (const locate of cdns) {
+      try {
+        this.holistic = new Holistic({ locateFile: locate });
+        this.setSettings(this.settings);
+        this.holistic.onResults((results) => this.processResults(results));
+        if (typeof this.holistic.initialize === 'function') {
+          await this.holistic.initialize();
+        }
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.warn('[Tracking] holistic init failed with CDN, trying next:', err?.message || err);
+        this.holistic = null;
+      }
+    }
+    if (lastErr) {
+      throw new Error(`MediaPipe Holistic failed to initialize (WASM load error). ${lastErr.message || lastErr}`);
     }
   }
   
