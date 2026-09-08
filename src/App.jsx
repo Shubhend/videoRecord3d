@@ -34,7 +34,7 @@ import {
   setLastPresetId,
 } from './lib/presetStore.js';
 import { getAppExpressionSensitivities } from './lib/settingsStore.js';
-import { DEFAULT_PLACEMENT, DEFAULT_BODY_PARTS } from './lib/sharedDefaults.js';
+import { DEFAULT_PLACEMENT, DEFAULT_BODY_PARTS, PLACEMENT_VERSION } from './lib/sharedDefaults.js';
 
 // Legacy pages quick-access (kept as comment reference; linked in TopNav):
 // - legacy-index.html: old full-body MediaPipe Holistic page
@@ -418,7 +418,7 @@ function FaceAppShell() {
       }
       showToast(`Model failed: ${msg}`, 'error');
     }
-  }, [anchorRoot, anchorRootRef, setModel, setClassified, setPlacement, showToast, ensureSceneGraph, startScene, canvasRef, rendererRef, cameraRef, tracking.started, placementRef.current]);
+  }, [anchorRoot, anchorRootRef, setModel, setClassified, setPlacement, showToast, ensureSceneGraph, startScene, canvasRef, rendererRef, cameraRef, tracking]);
 
   // ---------- Presets ----------
   const handleApplyPreset = useCallback(async (presetOrId) => {
@@ -589,7 +589,29 @@ function FaceAppShell() {
       <div className="layout">
         <div className="stage">
           <div id="stage-container" ref={stageRef} style={{ position: 'absolute', inset: 0 }}>
-            {/* MindAR injects its <video> preview and WebGL <canvas> here. */}
+            {/* Standalone preview canvas used BEFORE MindAR starts. MindAR will inject its own
+                <video>+<canvas> on start(), and useThreeScene.start({attachOnly:true}) will
+                dispose/remove this preview canvas to avoid double-rendering. */}
+            {!tracking.started && (
+              <canvas
+                key="standalone-preview"
+                ref={(el) => { try { canvasRef.current = el; } catch {} }}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  left: 0,
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: '100%',
+                  height: '100%',
+                  zIndex: 2,
+                  display: 'block',
+                  background:
+                    'radial-gradient(ellipse at 50% 40%, #16213e 0%, #0a0e1a 55%, #06080f 100%)',
+                }}
+              />
+            )}
           </div>
         </div>
         <aside className="sidebar">
