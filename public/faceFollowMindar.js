@@ -25,6 +25,17 @@ import {
   mouthWeightsToArkitMap,
 } from './faceFollowMorphMap.js';
 import { attachModelLikeBlender } from './faceFollowAlign.js';
+import { DEFAULT_PLACEMENT, DEFAULT_BODY_PARTS, PLACEMENT_VERSION } from './faceFollowMindarShared.js';
+import {
+  listPresets,
+  savePreset,
+  deletePreset,
+  getPreset,
+  populatePresetSelect,
+  setLastPresetId,
+  getLastPresetId,
+  normalizePreset,
+} from './faceFollowPlacementPresets.js';
 
 const MOUTH_EXPR_KEYS = ['aa', 'ih', 'ou', 'ee', 'oh'];
 
@@ -46,7 +57,6 @@ const FACE_VRM_EXPR_KEYS = [
 ];
 
 const PLACEMENT_KEY = 'faceFollowPlacement_v4';
-const PLACEMENT_VERSION = 4;
 const BODY_PARTS_KEY = 'faceFollowBodyParts';
 
 const HEAD_NAME_RE =
@@ -59,27 +69,11 @@ const LEG_NAME_RE = /leg|foot|shoe|thigh|calf|hip|sock|boot|heel|ankle/i;
 /** Do not match VRoid/MToon “outline” meshes — only obvious debug overlays. */
 const ARTIFACT_RE = /sticker|decal|makeup|facepaint|lineart|debug|helper|ghost/i;
 
-const DEFAULT_BODY_PARTS = {
-  showHead: true,
-  showHair: true,
-  showBody: true,
-  showArms: true,
-  showLegs: true,
-  headOnly: false,
-};
+const DEFAULT_BODY_PARTS_LOCAL = DEFAULT_BODY_PARTS;
 const UV_MAP_URL =
   'https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/face-tracking/assets/canonical_face_model_uv_visualization.png';
 
-const DEFAULT_PLACEMENT = {
-  version: PLACEMENT_VERSION,
-  posX: 0.025,
-  posY: -13,
-  posZ: 0.003,
-  rotX: 0,
-  rotY: 0,
-  rotZ: 0,
-  scaleMul: 1,
-};
+const DEFAULT_PLACEMENT_LOCAL = DEFAULT_PLACEMENT;
 
 const $ = (id) => document.getElementById(id);
 const container = $('container');
@@ -89,6 +83,9 @@ const btnStart = $('btn-start');
 const btnModel = $('btn-model');
 const btnStop = $('btn-stop');
 const btnResetPlacement = $('btn-reset-placement');
+const presetSelect = $('preset-select');
+const btnPresetSave = $('btn-preset-save');
+const btnPresetDelete = $('btn-preset-delete');
 const showMeshInput = $('show-mesh');
 const showPipInput = $('show-pip');
 const videoFeed = $('video-feed');
@@ -693,6 +690,9 @@ function setHud(text) {
 
 function setPlacementUnlocked(on) {
   if (tuningPanel) tuningPanel.classList.toggle('locked', !on);
+  if (presetSelect) presetSelect.disabled = !on;
+  if (btnPresetSave) btnPresetSave.disabled = !on;
+  if (btnPresetDelete) btnPresetDelete.disabled = !on || !presetSelect?.value;
 }
 
 function setBodyPartsUnlocked(on) {
@@ -733,6 +733,97 @@ function syncInputsFromBodyParts() {
     const el = bodyPartInputs[key];
     if (!el || el.type !== 'checkbox') continue;
     el.checked = bodyParts[key] !== false;
+  }
+}
+
+function currentModelContext() {
+  const sel = $('model-select');
+  const id = sel?.value || getSelectedModelId();
+  const opt = sel?.options?.[sel.selectedIndex];
+  return {
+    modelId: id || null,
+    modelName: opt?.text?.replace(/\s*\(uploaded\)\s*$/i, '').trim() || null,
+  };
+}
+
+async function applyPreset(presetOrId, { reloadModel = false } = {}) {
+  const preset =
+    typeof presetOrId === 'string'
+      ? await getPreset(presetOrId)
+      : presetOrId;
+  if (!preset) return false;
+  const p = normalizePreset(preset);
+  placement = { ...DEFAULT_PLACEMENT, ...(p.placement || {}) };
+  bodyParts = { ...DEFAULT_BODY_PARTS, ...(p.bodyParts || {}) };
+  syncInputsFromPlacement();
+  syncInputsFromBodyParts();
+  applyPlacement();
+  if (running && modelLoaded) applyBodyPartVisibility();
+  if (reloadModel && p.modelId && p.modelId !== getSelectedModelId()) {
+    const sel = $('model-select');
+    if (sel) sel.value = p.modelId;
+    setSelectedModelId(p.modelId);
+    if (running && modelLoaded) await loadModelFace();
+  }
+  setLastPresetId(p.id);
+  if (presetSelect && presetSelect.value !== p.id) {
+    presetSelect.value = p.id;
+    if (btnPresetDelete) btnPresetDelete.disabled = false;
+  }
+  setStatus(`Preset loaded: <strong>${p.name}</strong>`, true);
+  return true;
+}
+
+async function refreshPresetDropdown() {
+  if (!presetSelect) return;
+  const last = presetSelect.value || getLastPresetId();
+  await populatePresetSelect(presetSelect, { includeEmpty: true });
+  if (last && [...presetSelect.options].some((o) => o.value === last)) {
+    presetSelect.value = last;
+  }
+  if (btnPresetDelete) btnPresetDelete.disabled = !presetSelect.value;
+}
+
+async function handlePresetSave() {
+  const existingId = presetSelect?.value;
+  const existing = existingId ? await getPreset(existingId) : null;
+  const defaultName = existing
+    ? existing.name
+    : `Preset ${new Date().toLocaleString()}`;
+  const name = prompt(
+    existing
+      ? `Update preset name (or save as new by changing name):`
+      : `Save current placement + body parts as:`,
+    defaultName
+  );
+  if (name == null || !String(name).trim()) return;
+  readPlacementFromInputs();
+  syncBodyPartsFromInputs();
+  const ctx = currentModelContext();
+  const record = await savePreset({
+    id: existing && name === existing.name ? existing.id : null,
+    name: String(name).trim(),
+    placement: { ...placement },
+    bodyParts: { ...bodyParts },
+    modelId: ctx.modelId,
+    modelName: ctx.modelName,
+  });
+  await refreshPresetDropdown();
+  setStatus(`Saved preset: <strong>${record.name}</strong>`, true);
+}
+
+async function handlePresetDelete() {
+  const id = presetSelect?.value;
+  if (!id) return;
+  const preset = await getPreset(id);
+  const name = preset?.name || id;
+  if (!confirm(`Delete preset "${name}"?`)) return;
+  const ok = await deletePreset(id);
+  if (ok) {
+    await refreshPresetDropdown();
+    setStatus(`Deleted preset: <strong>${name}</strong>`, true);
+  } else {
+    setStatus(`Delete failed`, false);
   }
 }
 
@@ -1476,6 +1567,7 @@ function bindPlacementControls() {
   syncInputsFromBodyParts();
   setPlacementUnlocked(false);
   setBodyPartsUnlocked(false);
+  refreshPresetDropdown().catch(() => {});
 
   for (const el of Object.values(placementInputs)) {
     if (!el) continue;
@@ -1491,6 +1583,30 @@ function bindPlacementControls() {
     placement = { ...DEFAULT_PLACEMENT };
     syncInputsFromPlacement();
     applyPlacement();
+  });
+
+  presetSelect?.addEventListener('change', async () => {
+    const id = presetSelect.value;
+    if (btnPresetDelete) btnPresetDelete.disabled = !id;
+    if (!id) return;
+    try {
+      await applyPreset(id, { reloadModel: true });
+    } catch (e) {
+      console.error(e);
+      setStatus(`Preset load failed: ${e.message}`, false);
+    }
+  });
+  btnPresetSave?.addEventListener('click', () => {
+    handlePresetSave().catch((e) => {
+      console.error(e);
+      setStatus(`Preset save failed: ${e.message}`, false);
+    });
+  });
+  btnPresetDelete?.addEventListener('click', () => {
+    handlePresetDelete().catch((e) => {
+      console.error(e);
+      setStatus(`Preset delete failed: ${e.message}`, false);
+    });
   });
 
   const onBodyChange = (ev) => {

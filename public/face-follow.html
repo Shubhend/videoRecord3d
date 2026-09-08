@@ -198,6 +198,9 @@
       button.primary { background: #3b82f6; color: #fff; }
       button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
       button.secondary { background: #2a3544; color: #e8ecf0; }
+      button.tertiary { background: #3a2030; color: #ffd4dd; border: 1px solid #5c3040; }
+      button.tertiary:hover:not(:disabled) { background: #4a2638; }
+      button.tertiary:disabled { opacity: 0.4; cursor: not-allowed; }
       label.toggle {
         display: flex;
         align-items: center;
@@ -329,6 +332,16 @@
 
       <div id="tuning-panel" class="panel locked">
         <h3>Model position (step 1+)</h3>
+        <div class="num-row">
+          <label for="preset-select">Preset</label>
+          <select id="preset-select" style="flex: 1 1 auto; min-width: 0">
+            <option value="">— Saved presets —</option>
+          </select>
+          <button type="button" id="btn-preset-delete" class="tertiary" title="Delete selected preset" style="flex: 0 0 auto; width: 34px; padding: 6px 0">×</button>
+        </div>
+        <div class="num-row">
+          <button type="button" id="btn-preset-save" class="secondary" style="flex: 1 1 auto">💾 Save current as preset…</button>
+        </div>
         <div class="num-row">
           <label for="in-pos-x">Pos X</label>
           <input type="number" id="in-pos-x" min="-20" max="20" step="0.001" value="0.025" />
