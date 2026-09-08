@@ -49,6 +49,7 @@ function FaceAppShell() {
   const ctx = useFaceApp();
   const {
     tracking, setTracking,
+    faceMeshEnabled, setFaceMeshEnabled,
     placement, setPlacement,
     bodyParts, setBodyParts,
     model, setModel,

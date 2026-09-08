@@ -20,9 +20,13 @@ export default defineConfig({
       },
       mangle: {
         toplevel: true,
-        properties: {
-          regex: /^__/,
-        },
+        // NOTE: property mangling DISABLED intentionally.
+        // MindAR + bundled MediaPipe Tasks WASM glue code uses a set of known
+        // property-name strings (e.g. "__cxa_allocate_exception", "env") on the
+        // Emscripten module object to resolve WASM function imports. Mangling
+        // those property names breaks the import resolution and triggers:
+        //   LinkError: Import #N "env" "__cxa_*": function import requires a callable.
+        // Local / toplevel variable mangling still applies via toplevel: true.
       },
       format: {
         comments: false,
