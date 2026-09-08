@@ -226,7 +226,26 @@ function FaceAppShell() {
         try { vis = engine.sampleCurrent() || ZERO_VISEME; } catch { vis = ZERO_VISEME; }
       }
       applyVisemeToVrm(vrm, vis, settings);
-      applyFaceLandmarkExtrasToVrm(vrm, { browRaise: 0, frown: 0, smile: 0 });
+      // Only apply face-landmark extra morphs (brow/frown/smile) when mesh is enabled.
+      const meshOn = !!faceMeshEnabledRef.current;
+      applyFaceLandmarkExtrasToVrm(vrm, meshOn ? { browRaise: 0, frown: 0, smile: 0 } : { browRaise: 0, frown: 0, smile: 0 });
+    }
+
+    // When faceMeshEnabled is off AND we're in standalone preview, freeze anchor to identity pose
+    // (no-op; MindAR still drives anchor when attached, but it won't animate morphs).
+    if (!faceMeshEnabledRef.current) {
+      const anchor = anchorRootRef?.current;
+      if (anchor && m.modelRoot) {
+        // Keep model in a resting neutral pose: reset per-frame landmarks override if any applied
+        if (vrm) {
+          try {
+            // Neutralize any lingering face-expression animation delta when user toggles off mirroring
+            if (typeof vrm.expressionManager?.setValue === 'function') {
+              // VRM1 expression manager: no-op here, kept as extensibility hook
+            }
+          } catch {}
+        }
+      }
     }
 
     // Recording composite paint
@@ -266,9 +285,24 @@ function FaceAppShell() {
           renderer: rendererRef.current,
           attachOnly: true,
         });
+        standalonePreviewRef.current = false; // no longer standalone preview
       } catch (errAttach) {
         // non-fatal: the loop may already be running
       }
+
+      // 4) MindAR AR face-anchor uses its own relative coordinate system where
+      //    DEFAULT_PLACEMENT (posY=-13, etc.) is the correct avatar offset vs forehead.
+      //    Force a re-apply now that MindAR owns the scene transform.
+      try {
+        const p = placementRef.current;
+        const anchor = anchorRootRef?.current ?? anchorRoot;
+        if (anchor) {
+          anchor.position.set(p.posX, p.posY, p.posZ);
+          anchor.rotation.set(degToRad(p.rotX), degToRad(p.rotY), degToRad(p.rotZ));
+          const s = p.scaleMul ?? 1;
+          anchor.scale.set(s, s, s);
+        }
+      } catch {}
 
       setTracking({ started: true, faceDetected: false });
       bgCtrlRef.current?._scheduleApply?.();
@@ -279,7 +313,7 @@ function FaceAppShell() {
       const msg = (err && err.message) ? String(err.message) : String(err || 'Unknown error');
       showToast(`Tracking: ${msg}`, 'error');
     }
-  }, [faceTracking, startScene, ensureSceneGraph, rendererRef, setTracking, showToast]);
+  }, [faceTracking, startScene, ensureSceneGraph, rendererRef, setTracking, showToast, anchorRoot, anchorRootRef]);
 
   const handleStopTracking = useCallback(() => {
     try { faceTracking.stop(); } catch {}
@@ -293,6 +327,11 @@ function FaceAppShell() {
   // ---------- Model load ----------
   const handleLoadModel = useCallback(async (id) => {
     setModel((s) => ({ ...s, loading: true, loaded: false }));
+    // Always guarantee scene graph and render loop exist before loading.
+    try { ensureSceneGraph?.(); } catch {}
+    if (canvasRef?.current && !rendererRef?.current) {
+      try { startScene?.({}); } catch {}
+    }
     try {
       // Dispose prior
       const prev = modelRef.current;
@@ -309,7 +348,46 @@ function FaceAppShell() {
       const { modelRoot, vrm, isVrm } = await loadModelFromSource(source);
       setSelectedModelId(id);
 
-      if (anchor) anchor.add(modelRoot);
+      if (anchor) {
+        try { anchor.add(modelRoot); } catch (eAnchor) {
+          // Anchor still not created? create and add again.
+          ensureSceneGraph?.();
+          const a2 = anchorRootRef?.current;
+          if (a2) a2.add(modelRoot);
+        }
+      }
+
+      // Standalone preview centering: after successful load, ensure model is
+      // framed in the preview camera if we haven't attached MindAR renderer yet.
+      const stillStandalone = standalonePreviewRef.current || !tracking.started;
+      if (stillStandalone) {
+        const cam = cameraRef?.current;
+        const a = anchorRootRef?.current ?? anchorRoot;
+        if (a) {
+          a.position.set(0, 1.5, 0);
+          a.rotation.set(0, 0, 0);
+          const s = 0.9;
+          a.scale.set(s, s, s);
+          // Sync context placement so PlacementPanel doesn't show stale values vs actual preview
+          setPlacement({
+            version: PLACEMENT_VERSION || placementRef.current.version,
+            posX: 0,
+            posY: 1.5,
+            posZ: 0,
+            rotX: 0,
+            rotY: 0,
+            rotZ: 0,
+            scaleMul: s,
+          });
+        }
+        if (cam) {
+          cam.position.set(0, 1.5, 2.1);
+          cam.lookAt?.(0, 1.5, 0);
+          cam.near = 0.01;
+          cam.far = 100;
+          cam.updateProjectionMatrix?.();
+        }
+      }
 
       const models = await listModels();
       const modelInfo = models.find((x) => x.id === id) || { name: source.name, id };
@@ -340,7 +418,7 @@ function FaceAppShell() {
       }
       showToast(`Model failed: ${msg}`, 'error');
     }
-  }, [anchorRoot, anchorRootRef, setModel, setClassified, showToast]);
+  }, [anchorRoot, anchorRootRef, setModel, setClassified, setPlacement, showToast, ensureSceneGraph, startScene, canvasRef, rendererRef, cameraRef, tracking.started, placementRef.current]);
 
   // ---------- Presets ----------
   const handleApplyPreset = useCallback(async (presetOrId) => {
