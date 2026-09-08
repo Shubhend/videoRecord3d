@@ -20,6 +20,14 @@ import {
   setSelectedModelId,
 } from './faceFollowModelStore.js';
 import {
+  listPresets,
+  savePreset,
+  deletePreset,
+  renamePreset,
+  getLastPresetId,
+  setLastPresetId,
+} from './faceFollowPlacementPresets.js';
+import {
   buildMorphBindings,
   isMouthArkit,
   mouthWeightsToArkitMap,
@@ -1447,6 +1455,56 @@ function bindPlacementControls() {
   });
 }
 
+async function refreshPresetDropdown() {
+  const sel = $('preset-select');
+  if (!sel) return;
+  const presets = await listPresets();
+  const last = getLastPresetId();
+  sel.innerHTML = '';
+  if (presets.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No presets saved yet';
+    opt.disabled = true;
+    sel.appendChild(opt);
+    return;
+  }
+  for (const p of presets) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name + (p.modelName ? ` · ${p.modelName}` : '');
+    sel.appendChild(opt);
+  }
+  if (last && presets.some((p) => p.id === last)) {
+    sel.value = last;
+  } else if (presets.length) {
+    sel.value = presets[0].id;
+  }
+}
+
+async function getSelectedPreset() {
+  const sel = $('preset-select');
+  const id = sel?.value;
+  if (!id) return null;
+  const presets = await listPresets();
+  return presets.find((p) => p.id === id) || null;
+}
+
+function applyPresetData(preset) {
+  if (!preset) return;
+  if (preset.placement && typeof preset.placement === 'object') {
+    placement = { ...DEFAULT_PLACEMENT, ...preset.placement, version: PLACEMENT_VERSION };
+    syncInputsFromPlacement();
+    applyPlacement();
+  }
+  if (preset.bodyParts && typeof preset.bodyParts === 'object') {
+    bodyParts = { ...DEFAULT_BODY_PARTS, ...preset.bodyParts };
+    syncInputsFromBodyParts();
+    if (modelLoaded) applyBodyPartVisibility();
+  }
+  setLastPresetId(preset.id);
+}
+
 showMeshInput?.addEventListener('change', () => {
   setFaceMeshStyle(showMeshInput.checked);
   updateFaceShellVisibility();
@@ -1465,6 +1523,99 @@ $('btn-auto-fit')?.addEventListener('click', () => {
   setHud(
     `Auto-fit (head bone ×2)\nScene scale: ${root.scale.x.toFixed(2)}\nPos: ${placement.posX}, ${placement.posY}, ${placement.posZ}`
   );
+});
+
+$('btn-preset-apply')?.addEventListener('click', async () => {
+  try {
+    const preset = await getSelectedPreset();
+    if (!preset) {
+      setStatus('No preset selected. Save one first.', false);
+      return;
+    }
+    if (preset.modelId && $('model-select')?.value !== preset.modelId) {
+      $('model-select').value = preset.modelId;
+      setSelectedModelId(preset.modelId);
+      if (running && !modelLoaded) {
+        loadModelFace().catch(console.error);
+      } else if (running && modelLoaded) {
+        loadModelFace().catch(console.error);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    applyPresetData(preset);
+    setStatus(`Applied preset: <strong>${preset.name}</strong>`, true);
+  } catch (e) {
+    console.error(e);
+    setStatus(`Apply preset failed: ${e.message}`, false);
+  }
+});
+
+$('btn-preset-save')?.addEventListener('click', async () => {
+  try {
+    readPlacementFromInputs();
+    syncBodyPartsFromInputs();
+    const existing = await getSelectedPreset();
+    const defaultName = existing?.name || `Preset ${new Date().toLocaleString().slice(0, 17)}`;
+    const name = prompt('Save preset as:', defaultName);
+    if (!name) return;
+    const modelId = $('model-select')?.value || getSelectedModelId();
+    const modelName = (() => {
+      const sel = $('model-select');
+      const opt = sel?.selectedOptions?.[0];
+      return opt?.text?.split(' (')[0] || '';
+    })();
+    const record = await savePreset({
+      id: existing?.id,
+      name: name.trim(),
+      modelId,
+      modelName,
+      placement: { ...placement },
+      bodyParts: { ...bodyParts },
+    });
+    setLastPresetId(record.id);
+    await refreshPresetDropdown();
+    setStatus(`Saved preset: <strong>${record.name}</strong>`, true);
+  } catch (e) {
+    console.error(e);
+    setStatus(`Save preset failed: ${e.message}`, false);
+  }
+});
+
+$('btn-preset-delete')?.addEventListener('click', async () => {
+  try {
+    const preset = await getSelectedPreset();
+    if (!preset) {
+      setStatus('No preset selected.', false);
+      return;
+    }
+    if (!confirm(`Delete preset "${preset.name}"? This cannot be undone.`)) return;
+    await deletePreset(preset.id);
+    await refreshPresetDropdown();
+    setStatus(`Deleted preset: ${preset.name}`, true);
+  } catch (e) {
+    console.error(e);
+    setStatus(`Delete preset failed: ${e.message}`, false);
+  }
+});
+
+$('btn-preset-rename')?.addEventListener('click', async () => {
+  try {
+    const preset = await getSelectedPreset();
+    if (!preset) {
+      setStatus('No preset selected.', false);
+      return;
+    }
+    const name = prompt('Rename preset:', preset.name);
+    if (!name || name === preset.name) return;
+    await renamePreset(preset.id, name);
+    await refreshPresetDropdown();
+    const sel = $('preset-select');
+    if (sel) sel.value = preset.id;
+    setStatus(`Renamed preset to: <strong>${name}</strong>`, true);
+  } catch (e) {
+    console.error(e);
+    setStatus(`Rename preset failed: ${e.message}`, false);
+  }
 });
 
 window.addEventListener('storage', (e) => {
@@ -1503,6 +1654,15 @@ btnModel.addEventListener('click', () => {
 
 btnStop.addEventListener('click', () => stopAll());
 
-bindPlacementControls();
-bindExtendedUi();
-setRecordPanelUnlocked(false);
+function bootstrap() {
+  bindPlacementControls();
+  bindExtendedUi();
+  refreshPresetDropdown().catch(console.error);
+  setRecordPanelUnlocked(false);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
