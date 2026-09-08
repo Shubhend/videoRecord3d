@@ -6,7 +6,7 @@
 import { DEFAULT_PLACEMENT, DEFAULT_BODY_PARTS } from './faceFollowMindarShared.js';
 
 const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 2;
+const DB_VERSION = 99;
 const STORE = 'placementPresets';
 const MODELS_STORE = 'models';
 const LAST_KEY = 'faceFollowLastPresetId';
