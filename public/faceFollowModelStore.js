@@ -70,19 +70,22 @@ export async function listModels() {
   let uploaded = [];
   try {
     const db = await openDB();
-    const store = db.transaction(STORE, 'readonly').objectStore(STORE);
-    const all = await reqToPromise(store.getAll());
-    uploaded = all
-      .map((m) => ({
-        id: m.id,
-        name: m.name,
-        type: m.type || 'vrm',
-        addedAt: m.addedAt,
-        builtIn: false,
-      }))
-      .sort((a, b) => a.addedAt - b.addedAt);
-  } catch {
-    /* IndexedDB unavailable */
+    if (db.objectStoreNames.contains(STORE)) {
+      const tx = db.transaction(STORE, 'readonly');
+      const store = tx.objectStore(STORE);
+      const all = await reqToPromise(store.getAll());
+      uploaded = all
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          type: m.type || 'vrm',
+          addedAt: m.addedAt,
+          builtIn: false,
+        }))
+        .sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+    }
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[faceFollowModelStore] listModels failed:', e && e.message ? e.message : e);
   }
   return [...BUILT_INS, ...uploaded];
 }
@@ -137,17 +140,29 @@ export async function populateModelSelect(selectEl) {
   if (!selectEl) return;
   const models = await listModels();
   const selected = getSelectedModelId();
+  if (typeof console !== 'undefined')
+    console.info('[ModelsDropdown] populate:', models.length, 'models (built-ins + uploaded). selectedId=', selected);
   selectEl.innerHTML = '';
+  if (models.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No models available';
+    opt.disabled = true;
+    selectEl.appendChild(opt);
+    return;
+  }
   for (const m of models) {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.textContent = m.builtIn ? m.name : `${m.name} (uploaded)`;
     selectEl.appendChild(opt);
   }
-  if (models.some((m) => m.id === selected)) {
+  const validSelected = models.find((m) => m.id === selected);
+  if (validSelected) {
     selectEl.value = selected;
   } else {
-    selectEl.value = FACE_GLB_MODEL.id;
-    setSelectedModelId(selectEl.value);
+    const first = models[0];
+    selectEl.value = first.id;
+    setSelectedModelId(first.id);
   }
 }
