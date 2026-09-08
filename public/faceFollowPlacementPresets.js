@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 100;
+const DB_VERSION = 101;
 const PRESET_STORE = 'placementPresets';
 const LAST_PRESET_KEY = 'faceFollowLastPresetId';
 

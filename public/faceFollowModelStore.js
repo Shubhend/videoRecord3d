@@ -2,7 +2,7 @@
  * Same model list as js/modelStore.js (IndexedDB + built-ins) for face-follow page.
  */
 const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 100;
+const DB_VERSION = 101;
 const STORE = 'models';
 const PRESET_STORE = 'placementPresets';
 const FACE_MODEL_KEY = 'faceFollowSelectedModelId';
