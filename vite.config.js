@@ -12,26 +12,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      },
-      mangle: {
-        toplevel: true,
-        // NOTE: property mangling DISABLED intentionally.
-        // MindAR + bundled MediaPipe Tasks WASM glue code uses a set of known
-        // property-name strings (e.g. "__cxa_allocate_exception", "env") on the
-        // Emscripten module object to resolve WASM function imports. Mangling
-        // those property names breaks the import resolution and triggers:
-        //   LinkError: Import #N "env" "__cxa_*": function import requires a callable.
-        // Local / toplevel variable mangling still applies via toplevel: true.
-      },
-      format: {
-        comments: false,
-      },
-    },
+    // NOTE: minification disabled intentionally for diagnostic clarity.
+    // MindAR bundles its own @mediapipe/tasks-vision WASM + Emscripten glue; any
+    // aggressive property/identifier mangling can break WebAssembly import name
+    // matching and trigger LinkError on instantiate (see prior _emval_new_array
+    // and __cxa_allocate_exception crashes). Once this build is confirmed
+    // stable, you can re-enable `minify: 'esbuild'` as a lower-risk option.
+    minify: false,
+    sourcemap: true,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
@@ -40,7 +28,7 @@ export default defineConfig({
         settings: resolve(__dirname, 'settings.html'),
         cameras: resolve(__dirname, 'cameras.html'),
         faceFollow: resolve(__dirname, 'face-follow.html'),
-        record: resolve(__dirname, 'record.html')
+        record: resolve(__dirname, 'record.html'),
       },
       output: {
         entryFileNames: 'assets/app.[hash].js',
