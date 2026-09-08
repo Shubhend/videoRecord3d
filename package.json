@@ -20,6 +20,12 @@
   },
   "dependencies": {
     "@gltf-transform/cli": "^4.3.0",
-    "gltf-pipeline": "^4.3.0"
+    "@pixiv/three-vrm": "^3.5.5",
+    "gltf-pipeline": "^4.3.0",
+    "mind-ar": "^1.2.5",
+    "three": "0.160.0"
+  },
+  "overrides": {
+    "three": "0.160.0"
   }
 }
