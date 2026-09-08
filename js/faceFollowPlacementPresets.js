@@ -20,24 +20,29 @@ function openDB() {
       const db = req.result;
       if (!db.objectStoreNames.contains(MODELS_STORE)) {
         try {
-          db.createObjectStore(MODELS_STORE, { keyPath: 'id' });
+          const models = db.createObjectStore(MODELS_STORE, { keyPath: 'id' });
+          models.createIndex('addedAt', 'addedAt', { unique: false });
         } catch {
           /* already exists in older version */
+        }
+      } else {
+        try {
+          const txn = req.transaction;
+          if (txn) {
+            const s = txn.objectStore(MODELS_STORE);
+            if (!s.indexNames.contains('addedAt')) {
+              s.createIndex('addedAt', 'addedAt', { unique: false });
+            }
+          }
+        } catch {
+          /* ignore index creation on older browsers */
         }
       }
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' });
       }
     };
-    req.onsuccess = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.close();
-        reject(new Error('Store missing — reopen required'));
-        return;
-      }
-      resolve(db);
-    };
+    req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
   return _dbPromise;

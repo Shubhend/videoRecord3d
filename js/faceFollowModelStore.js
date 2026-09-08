@@ -44,7 +44,24 @@ function openDB() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: 'id' });
+        try {
+          const s = db.createObjectStore(STORE, { keyPath: 'id' });
+          s.createIndex('addedAt', 'addedAt', { unique: false });
+        } catch {
+          /* already exists */
+        }
+      } else {
+        try {
+          const txn = req.transaction;
+          if (txn) {
+            const s = txn.objectStore(STORE);
+            if (!s.indexNames.contains('addedAt')) {
+              s.createIndex('addedAt', 'addedAt', { unique: false });
+            }
+          }
+        } catch {
+          /* ignore index creation */
+        }
       }
       if (!db.objectStoreNames.contains('placementPresets')) {
         db.createObjectStore('placementPresets', { keyPath: 'id' });
