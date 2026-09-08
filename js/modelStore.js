@@ -3,7 +3,7 @@
 // Built-in defaults are referenced by URL; user uploads are stored as Blobs.
 
 const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 101;
+const DB_VERSION = 100;
 const STORE = 'models';
 const PRESET_STORE = 'placementPresets';
 const ACTIVE_KEY = 'edge_ai_active_model_id';
