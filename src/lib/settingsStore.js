@@ -150,6 +150,9 @@ export function loadAppSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
+    if (typeof raw !== 'string' || raw.trim().length < 2) return JSON.parse(JSON.stringify(DEFAULTS));
+    const c0 = raw.trim().charAt(0);
+    if (c0 !== '{' && c0 !== '[') return JSON.parse(JSON.stringify(DEFAULTS));
     return deepMerge(JSON.parse(JSON.stringify(DEFAULTS)), JSON.parse(raw));
   } catch {
     return JSON.parse(JSON.stringify(DEFAULTS));

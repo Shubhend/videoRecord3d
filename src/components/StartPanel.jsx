@@ -2,7 +2,7 @@ import React from 'react';
 import { useFaceApp } from '../context/FaceAppContext.jsx';
 
 export default function StartPanel() {
-  const { tracking, trackingApi, showToast } = useFaceApp();
+  const { tracking, trackingApi, faceMeshEnabled, setFaceMeshEnabled, showToast } = useFaceApp();
 
   const handleStart = async () => {
     const api = trackingApi.current;
@@ -28,11 +28,23 @@ export default function StartPanel() {
       className: 'btn primary full',
       disabled: tracking.started,
       onClick: handleStart,
-    }, tracking.started ? 'Tracking active…' : '1. Start face mesh tracking'),
+    }, tracking.started ? 'Tracking active…' : '1. Start camera + face tracking'),
     tracking.started && React.createElement('button', {
       className: 'btn secondary full',
       style: { marginTop: 6 },
       onClick: handleStop,
-    }, 'Stop')
+    }, 'Stop'),
+    React.createElement('label', {
+      className: 'toggle',
+      style: { marginTop: 12 },
+      title: 'When unchecked, the avatar stays in preview pose (camera still runs).',
+    },
+      React.createElement('input', {
+        type: 'checkbox',
+        checked: !!faceMeshEnabled,
+        onChange: (e) => setFaceMeshEnabled(!!e.target.checked),
+      }),
+      faceMeshEnabled ? 'Mirror my face movements to avatar' : 'Face movements disabled (preview pose)'
+    )
   );
 }

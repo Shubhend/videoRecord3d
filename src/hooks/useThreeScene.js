@@ -34,17 +34,34 @@ export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
 
   const start = useCallback((options = {}) => {
     ensureSceneGraph();
-    // Option A: external renderer provided (MindAR path) — just start the render loop.
+
+    // Transition: disposing previously-owned renderer if we are now attaching external one.
     if (options.renderer && options.attachOnly !== false) {
+      if (rendererRef.current && !attachedToExternalRendererRef.current && rendererRef.current !== options.renderer) {
+        const oldR = rendererRef.current;
+        try {
+          const scene = sceneRef.current;
+          if (scene) {
+            scene.traverse((obj) => {
+              if (obj.isMesh) {
+                obj.geometry?.dispose?.();
+                const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+                for (const m of mats) m?.dispose?.();
+              }
+            });
+          }
+          oldR.dispose?.();
+          oldR.forceContextLoss?.();
+        } catch {}
+        if (ownCanvasRef.current && ownCanvasRef.current.parentNode) {
+          try { ownCanvasRef.current.parentNode.removeChild(ownCanvasRef.current); } catch {}
+        }
+        ownCanvasRef.current = null;
+      }
       rendererRef.current = options.renderer;
       attachedToExternalRendererRef.current = true;
-      if (options.externalCanvasRef) {
-        // placeholder so consumers can distinguish
-      }
     } else if (!rendererRef.current) {
       if (!ownCanvasRef.current) {
-        // The caller should mount a canvas via canvasRef and attach it to DOM; if not present
-        // we throw early to match pre-MindAR flow.
         throw new Error('useThreeScene: canvasRef has no DOM canvas attached');
       }
       const r = new THREE.WebGLRenderer({
@@ -66,6 +83,8 @@ export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
           cameraRef.current.updateProjectionMatrix();
         }
       }
+    } else if (options.renderer === undefined && !attachedToExternalRendererRef.current) {
+      // Re-owning case: if caller calls start() again without renderer, re-use existing renderer.
     }
 
     // ResizeObserver only when owning the renderer + container available.

@@ -6,6 +6,7 @@ const FaceAppContext = createContext(null);
 
 export function FaceAppProvider({ children }) {
   const [tracking, setTracking] = useState({ started: false, faceDetected: false });
+  const [faceMeshEnabled, setFaceMeshEnabled] = useState(true);
   const [placement, setPlacement] = useState({ ...DEFAULT_PLACEMENT });
   const [bodyParts, setBodyParts] = useState({ ...DEFAULT_BODY_PARTS });
   const [model, setModelState] = useState({
@@ -108,6 +109,8 @@ export function FaceAppProvider({ children }) {
   const value = {
     tracking,
     setTracking,
+    faceMeshEnabled,
+    setFaceMeshEnabled,
     placement,
     setPlacement,
     bodyParts,

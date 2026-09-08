@@ -9,11 +9,11 @@ function formatDuration(ms) {
 }
 
 export default function StatusHud() {
-  const { tracking, model, activePreset, recording } = useFaceApp();
+  const { tracking, faceMeshEnabled, model, activePreset, recording } = useFaceApp();
 
   let stepMsg;
   if (!tracking.started) {
-    stepMsg = 'Step 1: Start tracking';
+    stepMsg = 'Preview mode';
   } else if (tracking.started && !model.loaded) {
     stepMsg = 'Step 2: Load model on face';
   } else if (recording.state === 'recording') {
@@ -22,8 +22,13 @@ export default function StatusHud() {
     stepMsg = 'Ready';
   }
 
-  const okClass = tracking.faceDetected && tracking.started ? ' ok' : '';
+  const okClass = tracking.faceDetected && tracking.started && faceMeshEnabled ? ' ok' : '';
   const hudLine2 = activePreset.name ? `\nPreset: ${activePreset.name}` : '';
+  let meshState;
+  if (!faceMeshEnabled) meshState = 'off (disabled)';
+  else if (!tracking.started) meshState = 'preview';
+  else if (!tracking.faceDetected) meshState = 'waiting…';
+  else meshState = 'active';
 
   return React.createElement('div', { className: `panel status-panel${okClass}` },
     React.createElement('strong', null, stepMsg),
@@ -35,7 +40,7 @@ export default function StatusHud() {
       React.createElement('span', null, formatDuration(recording.durationMs))
     ),
     React.createElement('pre', { className: 'hud' },
-      `Face mesh: ${tracking.faceDetected ? 'active' : 'off'}\nModel: ${model.name || 'none'}${hudLine2}`
+      `Face mesh: ${meshState}\nModel: ${model.name || 'none'}${hudLine2}`
     )
   );
 }

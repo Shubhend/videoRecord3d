@@ -103,12 +103,14 @@ function FaceAppShell() {
   const recStartTimeRef = useRef(0);
   const recPauseAccumRef = useRef(0);
   const recPauseStartedAtRef = useRef(0);
+  const standalonePreviewRef = useRef(true); // true while we haven't attached MindAR renderer yet
   const placementRef = useRef(placement);
   const bodyPartsRef = useRef(bodyParts);
   const modelRef = useRef(model);
   const classifiedRef = useRef(classified);
   const audioRef = useRef(audio);
   const recordingRef = useRef(recording);
+  const faceMeshEnabledRef = useRef(faceMeshEnabled);
   const exprSettingsRef = useRef(null);
 
   useEffect(() => { placementRef.current = placement; }, [placement]);
@@ -117,10 +119,50 @@ function FaceAppShell() {
   useEffect(() => { classifiedRef.current = classified; }, [classified]);
   useEffect(() => { audioRef.current = audio; }, [audio]);
   useEffect(() => { recordingRef.current = recording; }, [recording]);
+  useEffect(() => { faceMeshEnabledRef.current = faceMeshEnabled; }, [faceMeshEnabled]);
 
   useEffect(() => {
     exprSettingsRef.current = getAppExpressionSensitivities();
   }, []);
+
+  // ---------- Standalone preview mount: scene + canvas + render loop ASAP ----------
+  useEffect(() => {
+    // Guarantee scene graph + canvas + render loop starts even before user clicks any button.
+    // This ensures: (1) "Load model" shows model preview instantly and visibly.
+    //              (2) Placement sliders work immediately, not only after tracking start.
+    let detached = false;
+    Promise.resolve().then(() => {
+      if (detached) return;
+      try {
+        ensureSceneGraph?.();
+        // In standalone preview the model should be visible, centered, camera-friendly.
+        // Override default placement just on initial mount for standalone preview;
+        // MindAR mode switches to AR-relative DEFAULT_PLACEMENT automatically later.
+        const cam = cameraRef?.current;
+        if (cam) {
+          cam.position.set(0, 1.5, 2.1);
+          cam.lookAt?.(0, 1.5, 0);
+          cam.near = 0.01;
+          cam.far = 100;
+          cam.updateProjectionMatrix?.();
+        }
+        const anchor = anchorRootRef?.current;
+        if (anchor) {
+          // Preview pose: model at eye level, small size so full avatar is framed.
+          anchor.position.set(0, 1.5, 0);
+          anchor.rotation.set(0, 0, 0);
+          const s = 0.9;
+          anchor.scale.set(s, s, s);
+        }
+        if (canvasRef?.current && !rendererRef?.current) {
+          try { startScene?.({}); } catch {}
+        }
+      } catch (errInit) {
+        console.warn('Preview scene init skipped:', errInit);
+      }
+    });
+    return () => { detached = true; };
+  }, [ensureSceneGraph, startScene, canvasRef, cameraRef, anchorRootRef, rendererRef]);
 
   // ---------- Background controller ----------
   useEffect(() => {
@@ -289,7 +331,14 @@ function FaceAppShell() {
     } catch (err) {
       console.error(err);
       setModel((s) => ({ ...s, loading: false }));
-      showToast(`Model failed: ${err.message || err}`, 'error');
+      const raw = (err && err.message) ? String(err.message) : String(err || 'Unknown model-load error');
+      let msg = raw;
+      if (/unexpected token\s*[<']/i.test(raw) || /doctype/i.test(raw) || /html/i.test(raw)) {
+        msg = 'Built-in model file not found on disk. Upload a model via the Models page or place your .vrm/.glb files under /models/ in the project.';
+      } else if (/404|not found/i.test(raw)) {
+        msg = 'Model file not found on the server. Upload a new model via the Models page or check the file exists on disk.';
+      }
+      showToast(`Model failed: ${msg}`, 'error');
     }
   }, [anchorRoot, anchorRootRef, setModel, setClassified, showToast]);
 

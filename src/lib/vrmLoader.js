@@ -44,9 +44,21 @@ export async function loadModelFromSource(source, { signal } = {}) {
         throw new DOMException('Aborted', 'AbortError');
       }
     });
+  } catch (err) {
+    const msg = (err && err.message) ? String(err.message) : String(err || '');
+    if (/unexpected token\s*[<']/i.test(msg) || /doctype/i.test(msg) || /html/i.test(msg)) {
+      throw new Error(
+        'Model file could not be loaded (the server returned an HTML page instead of a .vrm/.glb file). ' +
+        'Make sure the file exists at the expected path or upload it via the Models page.'
+      );
+    }
+    if (/not found|404/i.test(msg)) {
+      throw new Error(`Model file not found: ${name || url}. Check the path or upload a new model.`);
+    }
+    throw err;
   } finally {
     if (shouldRevoke) {
-      URL.revokeObjectURL(url);
+      try { URL.revokeObjectURL(url); } catch {}
     }
   }
 
