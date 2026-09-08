@@ -17,12 +17,11 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      const oldVersion = e.oldVersion || 0;
       if (!db.objectStoreNames.contains('models')) {
         const store = db.createObjectStore('models', { keyPath: 'id' });
         store.createIndex('addedAt', 'addedAt', { unique: false });
       }
-      if (oldVersion < 2 && !db.objectStoreNames.contains(PRESET_STORE)) {
+      if (!db.objectStoreNames.contains(PRESET_STORE)) {
         const presetStore = db.createObjectStore(PRESET_STORE, { keyPath: 'id' });
         presetStore.createIndex('addedAt', 'addedAt', { unique: false });
       }
