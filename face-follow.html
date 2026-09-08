@@ -349,6 +349,13 @@
       </div>
     </div>
 
-    <script type="module" src="./faceFollowMindar.js"></script>
+    <script>
+      (function () {
+        var s = document.createElement('script');
+        s.type = 'module';
+        s.src = './faceFollowMindar.js';
+        document.body.appendChild(s);
+      })();
+    </script>
   </body>
 </html>
