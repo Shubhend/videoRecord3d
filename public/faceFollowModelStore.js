@@ -2,8 +2,9 @@
  * Same model list as js/modelStore.js (IndexedDB + built-ins) for face-follow page.
  */
 const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'models';
+const PRESET_STORE = 'placementPresets';
 const FACE_MODEL_KEY = 'faceFollowSelectedModelId';
 
 export const DEFAULT_MODEL = Object.freeze({
@@ -38,6 +39,18 @@ function openDB() {
   if (_dbPromise) return _dbPromise;
   _dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      const oldVersion = e.oldVersion || 0;
+      if (!db.objectStoreNames.contains(STORE)) {
+        const store = db.createObjectStore(STORE, { keyPath: 'id' });
+        store.createIndex('addedAt', 'addedAt', { unique: false });
+      }
+      if (oldVersion < 2 && !db.objectStoreNames.contains(PRESET_STORE)) {
+        const presetStore = db.createObjectStore(PRESET_STORE, { keyPath: 'id' });
+        presetStore.createIndex('addedAt', 'addedAt', { unique: false });
+      }
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });

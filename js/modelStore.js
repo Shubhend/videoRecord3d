@@ -3,8 +3,9 @@
 // Built-in defaults are referenced by URL; user uploads are stored as Blobs.
 
 const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'models';
+const PRESET_STORE = 'placementPresets';
 const ACTIVE_KEY = 'edge_ai_active_model_id';
 
 // Built-in default model bundled with the app (URL reference, not a blob).
@@ -25,9 +26,14 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+      const oldVersion = e.oldVersion || 0;
       if (!db.objectStoreNames.contains(STORE)) {
         const store = db.createObjectStore(STORE, { keyPath: 'id' });
         store.createIndex('addedAt', 'addedAt', { unique: false });
+      }
+      if (oldVersion < 2 && !db.objectStoreNames.contains(PRESET_STORE)) {
+        const presetStore = db.createObjectStore(PRESET_STORE, { keyPath: 'id' });
+        presetStore.createIndex('addedAt', 'addedAt', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
