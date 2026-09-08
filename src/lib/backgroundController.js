@@ -33,13 +33,38 @@ export class FaceBackground {
     this.imageUrl = null;
     this.screenStream = null;
     this.onScreenShareChange = null;
+    this._applyRaf = 0;
+    this._mo = null;
 
     if (containerEl) {
       containerEl.insertBefore(this.backdrop, containerEl.firstChild);
       containerEl.insertBefore(this.bgImage, this.backdrop.nextSibling);
       containerEl.insertBefore(this.screenVideo, this.bgImage.nextSibling);
+
+      const self = this;
+      this._mo = new MutationObserver(() => {
+        self._scheduleApply();
+      });
+      this._mo.observe(containerEl, { childList: true, subtree: false });
     }
     this.apply();
+  }
+
+  _scheduleApply() {
+    if (this._applyRaf) return;
+    this._applyRaf = requestAnimationFrame(() => {
+      this._applyRaf = 0;
+      try { this.apply(); } catch {}
+    });
+  }
+
+  dispose() {
+    if (this._mo) { try { this._mo.disconnect(); this._mo = null; } catch {} }
+    if (this._applyRaf) { cancelAnimationFrame(this._applyRaf); this._applyRaf = 0; }
+    this.stopScreenShare();
+    try { this.backdrop.remove?.(); } catch {}
+    try { this.bgImage.remove?.(); } catch {}
+    try { this.screenVideo.remove?.(); } catch {}
   }
 
   setConfig(partial) {

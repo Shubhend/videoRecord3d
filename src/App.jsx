@@ -64,24 +64,34 @@ function FaceAppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const stageRef = useRef(null);
+  const threeScene = useThreeScene({
+    containerRef: stageRef,
+    onBeforeRender: (delta) => onBeforeFrame(delta),
+  });
   const {
     canvasRef,
     scene,
     camera,
     renderer,
     anchorRoot,
+    sceneRef,
+    cameraRef,
+    rendererRef,
+    anchorRootRef,
+    ensureSceneGraph,
     start: startScene,
-  } = useThreeScene({
-    containerRef: stageRef,
-    onBeforeRender: (delta) => onBeforeFrame(delta),
-  });
+  } = threeScene;
 
   const faceTracking = useFaceTracking({
     containerRef: stageRef,
     scene,
+    sceneRef,
     camera,
+    cameraRef,
     renderer,
+    rendererRef,
     anchorRoot,
+    anchorRootRef,
     onFaceDetected: () => setTracking((s) => ({ ...s, faceDetected: true })),
     onFaceLost: () => setTracking((s) => ({ ...s, faceDetected: false })),
   });
@@ -129,13 +139,14 @@ function FaceAppShell() {
 
   // ---------- Apply placement to anchor ----------
   useEffect(() => {
-    if (!anchorRoot) return;
+    const anchor = anchorRootRef?.current ?? anchorRoot;
+    if (!anchor) return;
     const p = placementRef.current;
-    anchorRoot.position.set(p.posX, p.posY, p.posZ);
-    anchorRoot.rotation.set(degToRad(p.rotX), degToRad(p.rotY), degToRad(p.rotZ));
+    anchor.position.set(p.posX, p.posY, p.posZ);
+    anchor.rotation.set(degToRad(p.rotX), degToRad(p.rotY), degToRad(p.rotZ));
     const s = p.scaleMul ?? 1;
-    anchorRoot.scale.set(s, s, s);
-  }, [placement, anchorRoot]);
+    anchor.scale.set(s, s, s);
+  }, [placement, anchorRoot, anchorRootRef]);
 
   // ---------- Apply body visibility on changes ----------
   useEffect(() => {
@@ -197,16 +208,36 @@ function FaceAppShell() {
   // ---------- Tracking start/stop ----------
   const handleStartTracking = useCallback(async () => {
     try {
-      await startScene();
+      // 1) Pre-create our scene/anchor in refs so useFaceTracking can reparent anchor under
+      //    MindAR's anchor.group with the correct shared THREE objects.
+      ensureSceneGraph?.();
+
+      // 2) Start MindAR — it will create its own <video> + <canvas> inside stage-container
+      //    in the correct sibling order for preview layering. After start it patches the
+      //    shared rendererRef/sceneRef/cameraRef to point at its instances.
       await faceTracking.start();
+
+      // 3) Start our RAF ticker (runs VRM update + viseme + record paint). Use the
+      //    renderer MindAR created (patch happened inside start above), attachOnly mode.
+      try {
+        startScene({
+          renderer: rendererRef.current,
+          attachOnly: true,
+        });
+      } catch (errAttach) {
+        // non-fatal: the loop may already be running
+      }
+
       setTracking({ started: true, faceDetected: false });
+      bgCtrlRef.current?._scheduleApply?.();
+      try { bgCtrlRef.current?.apply?.(); } catch {}
       showToast('Face tracking started', 'ok');
     } catch (err) {
       console.error(err);
-      showToast(`Tracking failed: ${err.message || err}`, 'error');
-      throw err;
+      const msg = (err && err.message) ? String(err.message) : String(err || 'Unknown error');
+      showToast(`Tracking: ${msg}`, 'error');
     }
-  }, [faceTracking, startScene, setTracking, showToast]);
+  }, [faceTracking, startScene, ensureSceneGraph, rendererRef, setTracking, showToast]);
 
   const handleStopTracking = useCallback(() => {
     try { faceTracking.stop(); } catch {}
@@ -223,8 +254,9 @@ function FaceAppShell() {
     try {
       // Dispose prior
       const prev = modelRef.current;
-      if (prev.modelRoot && anchorRoot) {
-        try { anchorRoot.remove(prev.modelRoot); } catch {}
+      const anchor = anchorRootRef?.current ?? anchorRoot;
+      if (prev.modelRoot && anchor) {
+        try { anchor.remove(prev.modelRoot); } catch {}
         try { disposeObject3D(prev.modelRoot); } catch {}
       }
       if (prev.vrm && typeof prev.vrm.dispose === 'function') {
@@ -235,7 +267,7 @@ function FaceAppShell() {
       const { modelRoot, vrm, isVrm } = await loadModelFromSource(source);
       setSelectedModelId(id);
 
-      if (anchorRoot) anchorRoot.add(modelRoot);
+      if (anchor) anchor.add(modelRoot);
 
       const models = await listModels();
       const modelInfo = models.find((x) => x.id === id) || { name: source.name, id };
@@ -259,7 +291,7 @@ function FaceAppShell() {
       setModel((s) => ({ ...s, loading: false }));
       showToast(`Model failed: ${err.message || err}`, 'error');
     }
-  }, [anchorRoot, setModel, setClassified, showToast]);
+  }, [anchorRoot, anchorRootRef, setModel, setClassified, showToast]);
 
   // ---------- Presets ----------
   const handleApplyPreset = useCallback(async (presetOrId) => {
@@ -420,11 +452,9 @@ function FaceAppShell() {
   // ---------- Auto-apply last preset on mount (after tracking starts?) ----------
   // Legacy: apply preset from getLastPresetId() only if user has previously saved one.
   // Here: keep as manual selection for simplicity, but expose it through PlacementPanel list.
-
-  const canvasElement = useMemo(
-    () => <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />,
-    [canvasRef]
-  );
+  //
+  // Note: MindAR creates its own <video> + <canvas> inside stage-container on start().
+  // Stage container intentionally starts empty so sibling order is [video, canvas, backdrop].
 
   return (
     <div className="app-shell">
@@ -432,7 +462,7 @@ function FaceAppShell() {
       <div className="layout">
         <div className="stage">
           <div id="stage-container" ref={stageRef} style={{ position: 'absolute', inset: 0 }}>
-            {canvasElement}
+            {/* MindAR injects its <video> preview and WebGL <canvas> here. */}
           </div>
         </div>
         <aside className="sidebar">

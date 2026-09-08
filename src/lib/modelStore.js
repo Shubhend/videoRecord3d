@@ -1,6 +1,12 @@
 /**
  * Same model list as js/modelStore.js (IndexedDB + built-ins) for face-follow page.
  */
+import.meta.glob([
+  '/models/**/*.vrm',
+  '/models/**/*.glb',
+  '/models/**/*.gltf',
+], { eager: false, query: '?url', import: 'default' });
+
 const DB_NAME = 'edge_ai_models';
 const DB_VERSION = 99;
 const STORE = 'models';
@@ -101,13 +107,33 @@ export async function listModels() {
   return [...BUILT_INS, ...uploaded];
 }
 
+async function probeUrl(url) {
+  try {
+    const r = await fetch(url, { method: 'HEAD' });
+    if (!r.ok) return false;
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (/html/.test(ct)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getModelSource(id) {
   const builtIn = BUILT_INS.find((m) => m.id === id);
   if (builtIn) {
+    const url = resolveAssetUrl(builtIn.url);
+    const ok = await probeUrl(url);
+    if (!ok) {
+      throw new Error(
+        `Built-in model file not found on disk: ${builtIn.url}. ` +
+        `Place your .vrm/.glb files under a /models/ folder or upload them via Models page first.`
+      );
+    }
     return {
       id: builtIn.id,
       type: 'url',
-      value: resolveAssetUrl(builtIn.url),
+      value: url,
       name: builtIn.name,
       label: builtIn.url,
     };
@@ -128,14 +154,14 @@ export async function getModelSource(id) {
   } catch {
     /* ignore */
   }
-  return getModelSource(FACE_GLB_MODEL.id);
+  return getModelSource(DEFAULT_MODEL.id);
 }
 
 export function getSelectedModelId() {
   try {
-    return localStorage.getItem(FACE_MODEL_KEY) || FACE_GLB_MODEL.id;
+    return localStorage.getItem(FACE_MODEL_KEY) || DEFAULT_MODEL.id;
   } catch {
-    return FACE_GLB_MODEL.id;
+    return DEFAULT_MODEL.id;
   }
 }
 
@@ -161,7 +187,7 @@ export async function populateModelSelect(selectEl) {
   if (models.some((m) => m.id === selected)) {
     selectEl.value = selected;
   } else {
-    selectEl.value = FACE_GLB_MODEL.id;
+    selectEl.value = DEFAULT_MODEL.id;
     setSelectedModelId(selectEl.value);
   }
 }

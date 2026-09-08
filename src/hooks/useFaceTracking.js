@@ -4,9 +4,13 @@ import { MindARThree } from 'mindar-face-three';
 export default function useFaceTracking({
   containerRef,
   scene,
+  sceneRef,
   camera,
+  cameraRef,
   renderer,
+  rendererRef,
   anchorRoot,
+  anchorRootRef,
   onFaceDetected,
   onFaceLost,
 }) {
@@ -24,7 +28,6 @@ export default function useFaceTracking({
   useEffect(() => {
     onFaceDetectedRef.current = onFaceDetected;
   }, [onFaceDetected]);
-
   useEffect(() => {
     onFaceLostRef.current = onFaceLost;
   }, [onFaceLost]);
@@ -33,11 +36,11 @@ export default function useFaceTracking({
     if (!containerRef?.current) {
       throw new Error('useFaceTracking: containerRef is not attached to a DOM element');
     }
-    if (!scene || !camera || !renderer) {
-      throw new Error('useFaceTracking: scene, camera, and renderer must be initialized (call useThreeScene.start() first)');
-    }
     if (mindARRef.current) return;
 
+    // Build MindAR without injecting renderer/scene/camera — let it create its own.
+    // Then we patch its created renderer references into our shared refs so consumers
+    // (App placement, recording, visibility) read the correct canvas from MindAR.
     const mindarThree = new MindARThree({
       container: containerRef.current,
       imageTarget: null,
@@ -48,9 +51,8 @@ export default function useFaceTracking({
       uiScanning: 'no',
       filterMinCF: 0.9,
       filterBeta: 500,
-      renderer,
-      scene,
-      camera,
+      // NOTE: do NOT pass renderer/scene/camera here. MindAR creates them internally and
+      // inserts them in correct sibling order below its <video> preview layer.
     });
 
     mindARRef.current = mindarThree;
@@ -58,14 +60,36 @@ export default function useFaceTracking({
 
     await mindarThree.start();
 
+    // Patch shared refs to use MindAR's renderer/scene/camera so App wiring picks them up.
+    if (rendererRef && mindarThree.renderer) {
+      rendererRef.current = mindarThree.renderer;
+    }
+    if (sceneRef && mindarThree.scene) {
+      // Merge our anchorRoot into MindAR's scene if it has been created separately:
+      if (sceneRef.current !== mindarThree.scene) {
+        const anchor = anchorRootRef?.current ?? anchorRoot;
+        if (anchor && anchor.parent) {
+          try { anchor.parent.remove(anchor); } catch {}
+        }
+        if (anchor && !mindarThree.scene.children.includes(anchor)) {
+          mindarThree.scene.add(anchor);
+        }
+        sceneRef.current = mindarThree.scene;
+      }
+    }
+    if (cameraRef && mindarThree.camera) {
+      cameraRef.current = mindarThree.camera;
+    }
+
     const anchor = mindarThree.addAnchor(0);
     anchorRef.current = anchor;
 
-    if (anchorRoot && anchor.group) {
-      if (anchorRoot.parent) {
-        anchorRoot.parent.remove(anchorRoot);
+    const anchorInst = anchorRootRef?.current ?? anchorRoot;
+    if (anchorInst && anchor.group) {
+      if (anchorInst.parent) {
+        try { anchorInst.parent.remove(anchorInst); } catch {}
       }
-      anchor.group.add(anchorRoot);
+      anchor.group.add(anchorInst);
     }
 
     const handleFound = () => {
@@ -86,7 +110,7 @@ export default function useFaceTracking({
     lostHandlerRef.current = handleLost;
 
     setStarted(true);
-  }, [containerRef, scene, camera, renderer, anchorRoot]);
+  }, [containerRef, scene, sceneRef, camera, cameraRef, renderer, rendererRef, anchorRoot, anchorRootRef]);
 
   const stop = useCallback(() => {
     const anchor = anchorRef.current;

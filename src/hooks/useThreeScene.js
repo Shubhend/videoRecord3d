@@ -2,15 +2,15 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 
 export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
-  const canvasRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
   const anchorRootRef = useRef(null);
   const rafRef = useRef(null);
-  const resizeRef = useRef(null);
   const clockRef = useRef(null);
   const onBeforeRenderRef = useRef(onBeforeRender);
+  const attachedToExternalRendererRef = useRef(false);
+  const ownCanvasRef = useRef(null);
 
   const [started, setStarted] = useState(false);
 
@@ -18,35 +18,58 @@ export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
     onBeforeRenderRef.current = onBeforeRender;
   }, [onBeforeRender]);
 
-  const start = useCallback(() => {
-    if (!canvasRef.current) {
-      throw new Error('useThreeScene: canvasRef not attached to a <canvas> element');
+  function ensureSceneGraph() {
+    if (!sceneRef.current) sceneRef.current = new THREE.Scene();
+    if (!cameraRef.current) {
+      const c = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+      cameraRef.current = c;
     }
+    if (!anchorRootRef.current) {
+      const g = new THREE.Group();
+      sceneRef.current.add(g);
+      anchorRootRef.current = g;
+    }
+    if (!clockRef.current) clockRef.current = new THREE.Clock();
+  }
 
-    if (!rendererRef.current) {
-      const renderer = new THREE.WebGLRenderer({
-        canvas: canvasRef.current,
+  const start = useCallback((options = {}) => {
+    ensureSceneGraph();
+    // Option A: external renderer provided (MindAR path) — just start the render loop.
+    if (options.renderer && options.attachOnly !== false) {
+      rendererRef.current = options.renderer;
+      attachedToExternalRendererRef.current = true;
+      if (options.externalCanvasRef) {
+        // placeholder so consumers can distinguish
+      }
+    } else if (!rendererRef.current) {
+      if (!ownCanvasRef.current) {
+        // The caller should mount a canvas via canvasRef and attach it to DOM; if not present
+        // we throw early to match pre-MindAR flow.
+        throw new Error('useThreeScene: canvasRef has no DOM canvas attached');
+      }
+      const r = new THREE.WebGLRenderer({
+        canvas: ownCanvasRef.current,
         alpha: true,
         antialias: true,
         preserveDrawingBuffer: true,
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      rendererRef.current = renderer;
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      rendererRef.current = r;
+      attachedToExternalRendererRef.current = false;
 
-      const scene = new THREE.Scene();
-      sceneRef.current = scene;
-
-      const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
-      cameraRef.current = camera;
-
-      const anchorRoot = new THREE.Group();
-      scene.add(anchorRoot);
-      anchorRootRef.current = anchorRoot;
-
-      clockRef.current = new THREE.Clock();
+      if (containerRef?.current) {
+        const w = containerRef.current.clientWidth;
+        const h = containerRef.current.clientHeight;
+        if (w > 0 && h > 0) {
+          r.setSize(w, h, false);
+          cameraRef.current.aspect = w / h;
+          cameraRef.current.updateProjectionMatrix();
+        }
+      }
     }
 
-    if (containerRef?.current && !resizeRef.current) {
+    // ResizeObserver only when owning the renderer + container available.
+    if (!options.renderer && containerRef?.current) {
       const ro = new ResizeObserver(() => {
         const container = containerRef.current;
         if (!container || !rendererRef.current || !cameraRef.current) return;
@@ -58,30 +81,25 @@ export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
         cameraRef.current.updateProjectionMatrix();
       });
       ro.observe(containerRef.current);
-      resizeRef.current = ro;
-
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
-      if (w > 0 && h > 0 && rendererRef.current && cameraRef.current) {
-        rendererRef.current.setSize(w, h, false);
-        cameraRef.current.aspect = w / h;
-        cameraRef.current.updateProjectionMatrix();
-      }
+      (start.resizeCleanup || (start.resizeCleanup = new Set())).add(() => ro.disconnect());
     }
 
     if (!rafRef.current) {
       const tick = () => {
         const clock = clockRef.current;
         const scene = sceneRef.current;
-        const camera = cameraRef.current;
-        const renderer = rendererRef.current;
-        if (!clock || !scene || !camera || !renderer) return;
-
+        const cam = cameraRef.current;
+        const r = rendererRef.current;
+        if (!clock || !scene || !cam || !r) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
         const delta = clock.getDelta();
         const cb = onBeforeRenderRef.current;
-        if (cb) cb(delta, scene, camera);
-        renderer.render(scene, camera);
-
+        if (cb) cb(delta, scene, cam);
+        if (!attachedToExternalRendererRef.current) {
+          r.render(scene, cam);
+        }
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
@@ -95,18 +113,16 @@ export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    if (resizeRef.current) {
-      resizeRef.current.disconnect();
-      resizeRef.current = null;
-    }
+    const fns = start.resizeCleanup;
+    if (fns) { for (const fn of Array.from(fns)) try { fn(); } catch {} fns.clear(); }
     setStarted(false);
-  }, []);
+  }, [start]);
 
   useEffect(() => {
     return () => {
       stop();
-      const renderer = rendererRef.current;
-      if (renderer) {
+      const r = rendererRef.current;
+      if (r && !attachedToExternalRendererRef.current) {
         const scene = sceneRef.current;
         if (scene) {
           scene.traverse((obj) => {
@@ -117,23 +133,45 @@ export default function useThreeScene({ containerRef, onBeforeRender } = {}) {
             }
           });
         }
-        renderer.dispose();
-        renderer.forceContextLoss?.();
-        rendererRef.current = null;
-        sceneRef.current = null;
-        cameraRef.current = null;
-        anchorRootRef.current = null;
-        clockRef.current = null;
+        r.dispose();
+        r.forceContextLoss?.();
       }
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      anchorRootRef.current = null;
+      clockRef.current = null;
+      attachedToExternalRendererRef.current = false;
     };
   }, [stop]);
 
   return {
-    canvasRef,
-    scene: sceneRef.current,
-    camera: cameraRef.current,
-    renderer: rendererRef.current,
-    anchorRoot: anchorRootRef.current,
+    canvasRef: new Proxy(
+      { current: null },
+      {
+        get(t, p) {
+          if (p === 'current') {
+            if (rendererRef.current) return rendererRef.current.domElement || ownCanvasRef.current;
+            return ownCanvasRef.current;
+          }
+          if (p === 'setCurrent') return (el) => { ownCanvasRef.current = el; };
+          return undefined;
+        },
+        set(t, p, v) {
+          if (p === 'current') { ownCanvasRef.current = v; return true; }
+          return false;
+        },
+      }
+    ),
+    get scene() { return sceneRef.current; },
+    get camera() { return cameraRef.current; },
+    get renderer() { return rendererRef.current; },
+    get anchorRoot() { return anchorRootRef.current; },
+    sceneRef,
+    cameraRef,
+    rendererRef,
+    anchorRootRef,
+    ensureSceneGraph,
     started,
     start,
     stop,
