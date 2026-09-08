@@ -1,7 +1,7 @@
 /**
  * Audio lip-sync for face-follow: Web Audio playback + pre-baked phoneme timeline.
  */
-import { AudioLipsync } from './js/audioLipsync.js';
+import { AudioLipsync } from './audioLipsync.js';
 import { buildPhonemeTimeline, sampleTimeline } from './faceFollowPhonemeViseme.js';
 
 const ZERO = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
