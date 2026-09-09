@@ -77,7 +77,7 @@ async function render() {
 
   if (models.length === 1) {
     cards.push(
-      `<div class="empty-row">No uploaded models yet. Drop a .vrm file above to add one.</div>`
+      `<div class="empty-row">No uploaded models yet. Drop a .vrm/.glb — files are saved under public/assets/models/.</div>`
     );
   }
 

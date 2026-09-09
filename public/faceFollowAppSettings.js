@@ -1,6 +1,9 @@
 /**
  * Reads the same sensitivity / enable flags as js/settingsStore.js (Settings page).
+ * Source of truth: public/assets/data/settings.json (via assets API).
  */
+import { fetchData } from '../js/assetsClient.js';
+
 const SETTINGS_KEY = 'edge_ai_settings_v1';
 
 const DEFAULTS = {
@@ -34,7 +37,45 @@ function deepMerge(target, source) {
   return target;
 }
 
+let _cached = null;
+let _hydratePromise = null;
+
+export function hydrateAppSettings() {
+  if (_hydratePromise) return _hydratePromise;
+  _hydratePromise = (async () => {
+    try {
+      const disk = await fetchData('settings');
+      if (disk && typeof disk === 'object' && Object.keys(disk).length > 0) {
+        _cached = deepMerge(JSON.parse(JSON.stringify(DEFAULTS)), disk);
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(_cached));
+        } catch {
+          /* ignore */
+        }
+        return _cached;
+      }
+    } catch (err) {
+      console.warn('[faceFollowAppSettings] disk hydrate failed:', err);
+    }
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        _cached = deepMerge(JSON.parse(JSON.stringify(DEFAULTS)), JSON.parse(raw));
+        return _cached;
+      }
+    } catch {
+      /* ignore */
+    }
+    _cached = JSON.parse(JSON.stringify(DEFAULTS));
+    return _cached;
+  })();
+  return _hydratePromise;
+}
+
+hydrateAppSettings();
+
 export function loadAppSettings() {
+  if (_cached) return JSON.parse(JSON.stringify(_cached));
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));

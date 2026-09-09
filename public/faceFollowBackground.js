@@ -1,3 +1,10 @@
+import {
+  fetchData,
+  persistData,
+  uploadBackgroundFile,
+  deleteBackgroundFile,
+} from '../js/assetsClient.js';
+
 const BG_KEY = 'faceFollowBackground_v1';
 
 export class FaceBackground {
@@ -21,16 +28,54 @@ export class FaceBackground {
       containerEl.insertBefore(this.bgImage, this.backdrop.nextSibling);
     }
     this.apply();
+    this.hydrateFromDisk();
   }
 
   load() {
     try {
       const raw = localStorage.getItem(BG_KEY);
-      if (raw) return { mode: 'camera', blurPx: 12, color: '#0a0e14', ...JSON.parse(raw) };
+      if (raw) {
+        return {
+          mode: 'camera',
+          blurPx: 12,
+          color: '#0a0e14',
+          imageFile: null,
+          ...JSON.parse(raw),
+        };
+      }
     } catch {
       /* ignore */
     }
-    return { mode: 'camera', blurPx: 12, color: '#0a0e14' };
+    return { mode: 'camera', blurPx: 12, color: '#0a0e14', imageFile: null };
+  }
+
+  async hydrateFromDisk() {
+    try {
+      const disk = await fetchData('background');
+      if (disk && typeof disk === 'object') {
+        this.config = {
+          mode: disk.mode || 'camera',
+          blurPx: disk.blurPx ?? 12,
+          color: disk.color || '#0a0e14',
+          imageFile: disk.imageFile || null,
+        };
+        try {
+          localStorage.setItem(BG_KEY, JSON.stringify(this.config));
+        } catch {
+          /* ignore */
+        }
+        if (this.config.mode === 'image' && this.config.imageFile) {
+          this.imageUrl = new URL(
+            `assets/backgrounds/${this.config.imageFile}`,
+            document.baseURI || location.href
+          ).href;
+          this.bgImage.src = this.imageUrl;
+        }
+        this.apply();
+      }
+    } catch (err) {
+      console.warn('[FaceBackground] disk hydrate failed:', err);
+    }
   }
 
   save() {
@@ -39,6 +84,7 @@ export class FaceBackground {
     } catch {
       /* ignore */
     }
+    persistData('background', this.config);
   }
 
   setConfig(partial) {
@@ -47,24 +93,56 @@ export class FaceBackground {
     this.apply();
   }
 
-  setImageFile(file) {
-    if (this.imageUrl) URL.revokeObjectURL(this.imageUrl);
+  async setImageFile(file) {
+    if (this.imageUrl && this.imageUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(this.imageUrl);
+    }
     if (!file) {
       this.imageUrl = null;
-      this.setConfig({ mode: 'camera' });
+      this.setConfig({ mode: 'camera', imageFile: null });
       return;
     }
-    this.imageUrl = URL.createObjectURL(file);
-    this.bgImage.src = this.imageUrl;
-    this.setConfig({ mode: 'image' });
+    const prev = this.config.imageFile;
+    try {
+      const uploaded = await uploadBackgroundFile(file);
+      if (prev && prev !== uploaded.file) {
+        try {
+          await deleteBackgroundFile(prev);
+        } catch {
+          /* ignore */
+        }
+      }
+      this.imageUrl = new URL(
+        uploaded.url,
+        document.baseURI || location.href
+      ).href;
+      this.bgImage.src = this.imageUrl;
+      this.setConfig({ mode: 'image', imageFile: uploaded.file });
+    } catch (err) {
+      // Fallback: blob URL for preview if API unavailable
+      console.warn('[FaceBackground] upload failed, using blob URL:', err);
+      this.imageUrl = URL.createObjectURL(file);
+      this.bgImage.src = this.imageUrl;
+      this.setConfig({ mode: 'image' });
+    }
   }
 
-  clearImage() {
-    if (this.imageUrl) URL.revokeObjectURL(this.imageUrl);
+  async clearImage() {
+    const prev = this.config.imageFile;
+    if (this.imageUrl && this.imageUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(this.imageUrl);
+    }
     this.imageUrl = null;
     this.bgImage.removeAttribute('src');
     this.bgImage.style.display = 'none';
-    this.setConfig({ mode: 'camera' });
+    if (prev) {
+      try {
+        await deleteBackgroundFile(prev);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.setConfig({ mode: 'camera', imageFile: null });
   }
 
   /** Image element for live view + recording composite. */

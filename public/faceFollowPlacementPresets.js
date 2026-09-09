@@ -1,54 +1,29 @@
 /**
- * CRUD for placement presets stored in IndexedDB edge_ai_models.placementPresets.
- * Each preset captures position/rotation/scale, body-part visibility, and the
- * model context so switching a preset can also load the matching avatar.
+ * CRUD for placement presets → public/assets/data/presets.json
  */
 
-const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 100;
-const PRESET_STORE = 'placementPresets';
+import { fetchData, putData } from '../js/assetsClient.js';
+
 const LAST_PRESET_KEY = 'faceFollowLastPresetId';
-
-let _dbPromise = null;
-
-function openDB() {
-  if (_dbPromise) return _dbPromise.catch(() => { _dbPromise = null; return openDB(); });
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains('models')) {
-        const store = db.createObjectStore('models', { keyPath: 'id' });
-        store.createIndex('addedAt', 'addedAt', { unique: false });
-      }
-      if (!db.objectStoreNames.contains(PRESET_STORE)) {
-        const presetStore = db.createObjectStore(PRESET_STORE, { keyPath: 'id' });
-        presetStore.createIndex('addedAt', 'addedAt', { unique: false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => {
-      _dbPromise = null;
-      reject(req.error);
-    };
-  });
-  return _dbPromise;
-}
-
-function reqToPromise(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function presetTx(mode) {
-  const db = await openDB();
-  return db.transaction(PRESET_STORE, mode).objectStore(PRESET_STORE);
-}
 
 function makeId() {
   return `preset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function readPresetsFile() {
+  try {
+    const data = await fetchData('presets');
+    return {
+      presets: Array.isArray(data?.presets) ? data.presets : [],
+      lastPresetId: data?.lastPresetId || '',
+    };
+  } catch {
+    return { presets: [], lastPresetId: '' };
+  }
+}
+
+async function writePresetsFile(data) {
+  await putData('presets', data);
 }
 
 export function getLastPresetId() {
@@ -66,16 +41,22 @@ export function setLastPresetId(id) {
   } catch {
     /* ignore */
   }
+  (async () => {
+    try {
+      const cur = await readPresetsFile();
+      cur.lastPresetId = id || '';
+      await writePresetsFile(cur);
+      const sel = (await fetchData('selection').catch(() => ({}))) || {};
+      await putData('selection', { ...sel, lastPresetId: id || '' });
+    } catch (err) {
+      console.warn('[presets] lastPresetId save failed:', err);
+    }
+  })();
 }
 
 export async function listPresets() {
-  try {
-    const store = await presetTx('readonly');
-    const all = await reqToPromise(store.getAll());
-    return all.sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
-  } catch {
-    return [];
-  }
+  const { presets } = await readPresetsFile();
+  return presets.sort((a, b) => (a.addedAt || a.updatedAt || 0) - (b.addedAt || b.updatedAt || 0));
 }
 
 export async function savePreset(preset) {
@@ -87,23 +68,40 @@ export async function savePreset(preset) {
     placement: preset.placement ? { ...preset.placement } : null,
     bodyParts: preset.bodyParts ? { ...preset.bodyParts } : null,
     addedAt: Date.now(),
+    updatedAt: Date.now(),
   };
-  const store = await presetTx('readwrite');
-  await reqToPromise(store.put(record));
+  const data = await readPresetsFile();
+  const idx = data.presets.findIndex((p) => p.id === record.id);
+  if (idx >= 0) {
+    record.addedAt = data.presets[idx].addedAt || record.addedAt;
+    data.presets[idx] = record;
+  } else {
+    data.presets.push(record);
+  }
+  data.lastPresetId = record.id;
+  await writePresetsFile(data);
+  try {
+    localStorage.setItem(LAST_PRESET_KEY, record.id);
+  } catch {
+    /* ignore */
+  }
   return record;
 }
 
 export async function deletePreset(id) {
-  const store = await presetTx('readwrite');
-  await reqToPromise(store.delete(id));
+  const data = await readPresetsFile();
+  data.presets = data.presets.filter((p) => p.id !== id);
+  if (data.lastPresetId === id) data.lastPresetId = '';
+  await writePresetsFile(data);
   if (getLastPresetId() === id) setLastPresetId('');
 }
 
 export async function renamePreset(id, name) {
-  const store = await presetTx('readwrite');
-  const record = await reqToPromise(store.get(id));
+  const data = await readPresetsFile();
+  const record = data.presets.find((p) => p.id === id);
   if (!record) throw new Error('Preset not found');
   record.name = (name || '').trim() || record.name;
-  await reqToPromise(store.put(record));
+  record.updatedAt = Date.now();
+  await writePresetsFile(data);
   return record;
 }

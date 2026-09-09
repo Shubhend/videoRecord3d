@@ -1,53 +1,36 @@
 // ==================== BACKGROUND STORE ====================
-// Persists the user's chosen scene background:
-//   - mode:  'default' | 'color' | 'image'
-//   - color: '#rrggbb' (used when mode === 'color')
-//   - imageBlob: Blob (used when mode === 'image'), stored in IndexedDB
-// Mode/color are kept in localStorage so they're synchronous; the image
-// blob is in IndexedDB because images can be many MB.
+// Config → public/assets/data/background.json
+// Image file → public/assets/backgrounds/
 
-const DB_NAME = 'edge_ai_background';
-const DB_VERSION = 1;
-const STORE = 'background';
-const IMAGE_KEY = 'image';
+import {
+  fetchData,
+  putData,
+  persistData,
+  uploadBackgroundFile,
+  deleteBackgroundFile,
+} from './assetsClient.js';
+
 const CONFIG_KEY = 'edge_ai_background_config_v1';
 
 export const DEFAULT_BACKGROUND = Object.freeze({
   mode: 'default',
   color: '#0a0e1a',
+  imageFile: null,
 });
 
 const listeners = new Set();
-let _dbPromise = null;
+let _cachedConfig = null;
+let _hydratePromise = null;
 
-function openDB() {
-  if (_dbPromise) return _dbPromise;
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  return _dbPromise;
+function writeLocal(cfg) {
+  try {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+  } catch {
+    /* ignore */
+  }
 }
 
-function tx(mode) {
-  return openDB().then((db) => db.transaction(STORE, mode).objectStore(STORE));
-}
-
-function reqToPromise(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export function getBackgroundConfig() {
+function readLocal() {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (!raw) return { ...DEFAULT_BACKGROUND };
@@ -55,19 +38,54 @@ export function getBackgroundConfig() {
     return {
       mode: parsed.mode || 'default',
       color: typeof parsed.color === 'string' ? parsed.color : DEFAULT_BACKGROUND.color,
+      imageFile: parsed.imageFile || null,
     };
   } catch {
     return { ...DEFAULT_BACKGROUND };
   }
 }
 
+export function hydrateBackground() {
+  if (_hydratePromise) return _hydratePromise;
+  _hydratePromise = (async () => {
+    try {
+      const disk = await fetchData('background');
+      if (disk && typeof disk === 'object') {
+        _cachedConfig = {
+          mode: disk.mode || 'default',
+          color: typeof disk.color === 'string' ? disk.color : DEFAULT_BACKGROUND.color,
+          imageFile: disk.imageFile || null,
+        };
+        writeLocal(_cachedConfig);
+        return _cachedConfig;
+      }
+    } catch (err) {
+      console.warn('[backgroundStore] disk hydrate failed:', err);
+    }
+    _cachedConfig = readLocal();
+    try {
+      await putData('background', _cachedConfig);
+    } catch {
+      /* ignore */
+    }
+    return _cachedConfig;
+  })();
+  return _hydratePromise;
+}
+
+hydrateBackground();
+
+export function getBackgroundConfig() {
+  if (_cachedConfig) return { ..._cachedConfig };
+  _cachedConfig = readLocal();
+  return { ..._cachedConfig };
+}
+
 export function setBackgroundConfig(partial) {
   const next = { ...getBackgroundConfig(), ...partial };
-  try {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(next));
-  } catch {
-    // ignore (private mode etc.)
-  }
+  _cachedConfig = next;
+  writeLocal(next);
+  persistData('background', next);
   notify();
   return next;
 }
@@ -81,38 +99,53 @@ export async function setBackgroundImage(file) {
   if (file.name && !/\.(png|jpe?g|webp|gif|avif)$/i.test(lower)) {
     throw new Error('Use a common image format (.png, .jpg, .webp, .gif).');
   }
-  const store = await tx('readwrite');
-  await reqToPromise(store.put(file, IMAGE_KEY));
-  setBackgroundConfig({ mode: 'image' });
-  return file;
+  const prev = getBackgroundConfig().imageFile;
+  const uploaded = await uploadBackgroundFile(file);
+  if (prev && prev !== uploaded.file) {
+    try {
+      await deleteBackgroundFile(prev);
+    } catch {
+      /* ignore */
+    }
+  }
+  setBackgroundConfig({ mode: 'image', imageFile: uploaded.file });
+  return uploaded;
 }
 
 export async function clearBackgroundImage() {
-  const store = await tx('readwrite');
-  await reqToPromise(store.delete(IMAGE_KEY));
+  const prev = getBackgroundConfig().imageFile;
+  if (prev) {
+    try {
+      await deleteBackgroundFile(prev);
+    } catch {
+      /* ignore */
+    }
+  }
+  setBackgroundConfig({ imageFile: null, mode: 'default' });
   notify();
 }
 
 export async function getBackgroundImageBlob() {
-  const store = await tx('readonly');
-  const blob = await reqToPromise(store.get(IMAGE_KEY));
-  return blob || null;
+  const cfg = getBackgroundConfig();
+  if (!cfg.imageFile) return null;
+  try {
+    const url = new URL(`assets/backgrounds/${cfg.imageFile}`, document.baseURI || location.href).href;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null;
+  }
 }
 
-/**
- * Read the full state needed to apply the background:
- * resolves the image blob automatically when mode is 'image'.
- */
 export async function loadBackground() {
+  await hydrateBackground();
   const cfg = getBackgroundConfig();
-  const result = { mode: cfg.mode, color: cfg.color, blob: null };
+  const result = { mode: cfg.mode, color: cfg.color, blob: null, imageFile: cfg.imageFile };
   if (cfg.mode === 'image') {
     try {
       result.blob = await getBackgroundImageBlob();
-      if (!result.blob) {
-        // Image was deleted but mode wasn't reset — fall back gracefully.
-        result.mode = 'default';
-      }
+      if (!result.blob) result.mode = 'default';
     } catch {
       result.mode = 'default';
     }

@@ -1,83 +1,106 @@
 // ==================== MODEL STORE ====================
-// IndexedDB-backed persistence for uploaded VRM avatars.
-// Built-in defaults are referenced by URL; user uploads are stored as Blobs.
+// Physical persistence under public/assets/models + public/assets/data/models.json
+// (written via Vite /api/assets middleware during npm run dev / preview).
 
-const DB_NAME = 'edge_ai_models';
-const DB_VERSION = 100;
-const STORE = 'models';
-const PRESET_STORE = 'placementPresets';
+import {
+  listUploadedModels,
+  uploadModelFile,
+  renameUploadedModel,
+  deleteUploadedModel,
+  putData,
+  fetchData,
+} from './assetsClient.js';
+
 const ACTIVE_KEY = 'edge_ai_active_model_id';
 
-// Built-in default model bundled with the app (URL reference, not a blob).
+/** Built-in defaults — place matching files under public/assets/models/ */
 export const DEFAULT_MODEL = Object.freeze({
   id: 'default',
   name: 'Alicia Solid',
   size: 7879244,
   type: 'vrm',
-  url: 'models/AliciaSolid.vrm',
+  url: 'assets/models/AliciaSolid.vrm',
+  file: 'AliciaSolid.vrm',
   builtIn: true,
   addedAt: 0,
 });
 
-let _dbPromise = null;
-function openDB() {
-  if (_dbPromise) return _dbPromise.catch(() => { _dbPromise = null; return openDB(); });
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: 'id' });
-        store.createIndex('addedAt', 'addedAt', { unique: false });
-      }
-      if (!db.objectStoreNames.contains(PRESET_STORE)) {
-        const presetStore = db.createObjectStore(PRESET_STORE, { keyPath: 'id' });
-        presetStore.createIndex('addedAt', 'addedAt', { unique: false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => {
-      _dbPromise = null;
-      reject(req.error);
-    };
-  });
-  return _dbPromise;
+export const FACE_GLB_MODEL = Object.freeze({
+  id: 'face-glb',
+  name: '8329890252317737768',
+  type: 'glb',
+  url: 'assets/models/8329890252317737768.glb',
+  file: '8329890252317737768.glb',
+  builtIn: true,
+  addedAt: 0,
+});
+
+const BUILT_INS = [DEFAULT_MODEL, FACE_GLB_MODEL];
+
+function resolveAssetUrl(path) {
+  if (!path || typeof path !== 'string') return path;
+  if (/^(https?:|blob:|data:)/i.test(path)) return path;
+  const rel = path.replace(/^\//, '');
+  try {
+    const base =
+      (typeof document !== 'undefined' && document.baseURI) ||
+      (typeof location !== 'undefined' ? location.href : '/');
+    return new URL(rel, base).href;
+  } catch {
+    return rel;
+  }
 }
 
-function tx(mode) {
-  return openDB().then((db) => db.transaction(STORE, mode).objectStore(STORE));
+async function readIndex() {
+  try {
+    return await listUploadedModels();
+  } catch (err) {
+    console.warn('[modelStore] assets API unavailable:', err);
+    return { models: [], selectedModelId: 'default', activeModelId: 'default' };
+  }
 }
 
-function reqToPromise(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+async function syncSelectionToDisk(partial) {
+  try {
+    const cur = (await fetchData('selection').catch(() => ({}))) || {};
+    await putData('selection', { ...cur, ...partial });
+  } catch (err) {
+    console.warn('[modelStore] selection save failed:', err);
+  }
+  try {
+    const index = await readIndex();
+    await putData('models', {
+      models: index.models || [],
+      selectedModelId: partial.selectedModelId ?? index.selectedModelId,
+      activeModelId: partial.activeModelId ?? index.activeModelId,
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
- * Returns all models (default + uploaded), newest uploads last.
+ * Returns all models (built-ins + uploaded), newest uploads last.
  */
 export async function listModels() {
-  const store = await tx('readonly');
-  const all = await reqToPromise(store.getAll());
-  const uploaded = all
+  const index = await readIndex();
+  const uploaded = (index.models || [])
     .map((m) => ({
       id: m.id,
       name: m.name,
       size: m.size,
-      type: m.type,
-      addedAt: m.addedAt,
+      type: m.type || 'vrm',
+      url: m.url || (m.file ? `assets/models/${m.file}` : null),
+      file: m.file,
+      addedAt: m.addedAt || 0,
       builtIn: false,
     }))
     .sort((a, b) => a.addedAt - b.addedAt);
-  return [DEFAULT_MODEL, ...uploaded];
+  return [...BUILT_INS, ...uploaded];
 }
 
 /**
- * Add an uploaded avatar file. Accepts .vrm and .glb (VRM is a glTF container,
- * and some browsers save VRMs with a .glb extension). The actual VRM extensions
- * are validated when the file is loaded by the VRM loader.
+ * Add an uploaded avatar file. Writes the binary into public/assets/models/.
  */
 export async function addModel(file) {
   const lower = (file.name || '').toLowerCase();
@@ -86,43 +109,28 @@ export async function addModel(file) {
   if (!isVrm && !isGlb) {
     throw new Error('Only .vrm or .glb files are supported.');
   }
-  const id = `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const record = {
-    id,
-    name: file.name.replace(/\.(vrm|glb)$/i, ''),
-    size: file.size,
-    type: 'vrm',
-    blob: file,
-    addedAt: Date.now(),
-  };
-  const store = await tx('readwrite');
-  await reqToPromise(store.add(record));
+  const record = await uploadModelFile(file);
+  setActiveModelId(record.id);
   return record;
 }
 
 export async function deleteModel(id) {
-  if (id === DEFAULT_MODEL.id) {
+  if (id === DEFAULT_MODEL.id || id === FACE_GLB_MODEL.id) {
     throw new Error('Built-in model cannot be deleted.');
   }
-  const store = await tx('readwrite');
-  await reqToPromise(store.delete(id));
+  await deleteUploadedModel(id);
   if (getActiveModelId() === id) {
     setActiveModelId(DEFAULT_MODEL.id);
   }
 }
 
 export async function renameModel(id, newName) {
-  if (id === DEFAULT_MODEL.id) {
+  if (id === DEFAULT_MODEL.id || id === FACE_GLB_MODEL.id) {
     throw new Error('Built-in model cannot be renamed.');
   }
   const trimmed = (newName || '').trim();
   if (!trimmed) throw new Error('Name cannot be empty.');
-  const store = await tx('readwrite');
-  const record = await reqToPromise(store.get(id));
-  if (!record) throw new Error('Model not found.');
-  record.name = trimmed;
-  await reqToPromise(store.put(record));
-  return record;
+  return renameUploadedModel(id, trimmed);
 }
 
 /**
@@ -130,30 +138,15 @@ export async function renameModel(id, newName) {
  * Returns: { type: 'url'|'blob', value, name, id }
  */
 export async function getModelSource(id) {
-  if (!id || id === DEFAULT_MODEL.id) {
-    return {
-      id: DEFAULT_MODEL.id,
-      type: 'url',
-      value: DEFAULT_MODEL.url,
-      name: DEFAULT_MODEL.name,
-    };
-  }
-  const store = await tx('readonly');
-  const record = await reqToPromise(store.get(id));
-  if (!record) {
-    setActiveModelId(DEFAULT_MODEL.id);
-    return {
-      id: DEFAULT_MODEL.id,
-      type: 'url',
-      value: DEFAULT_MODEL.url,
-      name: DEFAULT_MODEL.name,
-    };
-  }
+  const models = await listModels();
+  const found = models.find((m) => m.id === id) || DEFAULT_MODEL;
+  const url = resolveAssetUrl(found.url || DEFAULT_MODEL.url);
   return {
-    id: record.id,
-    type: 'blob',
-    value: record.blob,
-    name: record.name,
+    id: found.id,
+    type: 'url',
+    value: url,
+    name: found.name,
+    label: found.url || found.name,
   };
 }
 
@@ -171,6 +164,26 @@ export function setActiveModelId(id) {
   } catch {
     // ignore storage errors (private mode etc.)
   }
+  syncSelectionToDisk({ activeModelId: id, selectedModelId: id });
+}
+
+/** Prefer disk selection when available (call on app boot). */
+export async function hydrateActiveModelId() {
+  try {
+    const index = await readIndex();
+    const id = index.activeModelId || index.selectedModelId;
+    if (id) {
+      try {
+        localStorage.setItem(ACTIVE_KEY, id);
+      } catch {
+        /* ignore */
+      }
+      return id;
+    }
+  } catch {
+    /* ignore */
+  }
+  return getActiveModelId();
 }
 
 export function formatBytes(bytes) {

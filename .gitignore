@@ -1,2 +1,8 @@
 node_modules/
 dist/
+
+# Uploaded binary models / backgrounds (keep folder structure + .gitkeep + JSON data)
+public/assets/models/*
+!public/assets/models/.gitkeep
+public/assets/backgrounds/*
+!public/assets/backgrounds/.gitkeep

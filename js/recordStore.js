@@ -1,4 +1,7 @@
 // Settings for the webcam record page (face overlay).
+// Persisted to public/assets/data/record.json
+
+import { fetchData, putData, persistData } from './assetsClient.js';
 
 const KEY = 'edge_ai_record_face_v1';
 
@@ -9,52 +12,91 @@ export const DEFAULT_RECORD_FACE = Object.freeze({
   bodyScale: 0,
   alignStrength: 0.85,
   mirror: true,
-  /** Screen follow: move opposite left/right & up/down */
   reverseHeadPosition: false,
-  /** Head turn / tilt from tracker opposite direction */
   reverseHeadRotation: false,
-  /** Mouth, eyes, expressions opposite (MediaPipe / Jeeliz) */
   reverseFaceMotion: false,
-  /** @deprecated use reverseHeadPosition */
   flipAlignX: false,
   showFullBody: false,
-  /** ±400 slider → up to ±2× screen span before tracking */
   offsetX: 0,
   offsetY: 0,
-  /** Degrees added to model facing (use 180 if you see the back of the head) */
   offsetRotY: 0,
 });
 
-export function getRecordFaceSettings() {
+let _cached = null;
+let _hydratePromise = null;
+
+function normalize(saved) {
+  const next = { ...DEFAULT_RECORD_FACE, ...saved };
+  if (next.bodyScale == null || next.bodyScale > 1) next.bodyScale = 0;
+  if (next.faceScale != null) {
+    next.faceScale = Math.min(5, Math.max(0.25, Number(next.faceScale)));
+  }
+  if (next.flipAlignX === true && next.reverseHeadPosition !== true) {
+    next.reverseHeadPosition = true;
+  }
+  if (next.offsetX != null) {
+    next.offsetX = Math.min(400, Math.max(-400, Number(next.offsetX)));
+  }
+  if (next.offsetY != null) {
+    next.offsetY = Math.min(400, Math.max(-400, Number(next.offsetY)));
+  }
+  return next;
+}
+
+function readLocal() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_RECORD_FACE };
-    const saved = { ...DEFAULT_RECORD_FACE, ...JSON.parse(raw) };
-    if (saved.bodyScale == null || saved.bodyScale > 1) saved.bodyScale = 0;
-    if (saved.faceScale != null) {
-      saved.faceScale = Math.min(5, Math.max(0.25, Number(saved.faceScale)));
-    }
-    if (saved.flipAlignX === true && saved.reverseHeadPosition !== true) {
-      saved.reverseHeadPosition = true;
-    }
-    if (saved.offsetX != null) {
-      saved.offsetX = Math.min(400, Math.max(-400, Number(saved.offsetX)));
-    }
-    if (saved.offsetY != null) {
-      saved.offsetY = Math.min(400, Math.max(-400, Number(saved.offsetY)));
-    }
-    return saved;
+    return normalize(JSON.parse(raw));
   } catch {
     return { ...DEFAULT_RECORD_FACE };
   }
 }
 
-export function saveRecordFaceSettings(partial) {
-  const next = { ...getRecordFaceSettings(), ...partial };
+function writeLocal(next) {
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
-    // ignore
+    /* ignore */
   }
+}
+
+export function hydrateRecordFaceSettings() {
+  if (_hydratePromise) return _hydratePromise;
+  _hydratePromise = (async () => {
+    try {
+      const disk = await fetchData('record');
+      if (disk && typeof disk === 'object' && Object.keys(disk).length > 0) {
+        _cached = normalize(disk);
+        writeLocal(_cached);
+        return _cached;
+      }
+    } catch (err) {
+      console.warn('[recordStore] disk hydrate failed:', err);
+    }
+    _cached = readLocal();
+    try {
+      await putData('record', _cached);
+    } catch {
+      /* ignore */
+    }
+    return _cached;
+  })();
+  return _hydratePromise;
+}
+
+hydrateRecordFaceSettings();
+
+export function getRecordFaceSettings() {
+  if (_cached) return { ..._cached };
+  _cached = readLocal();
+  return { ..._cached };
+}
+
+export function saveRecordFaceSettings(partial) {
+  const next = normalize({ ...getRecordFaceSettings(), ...partial });
+  _cached = next;
+  writeLocal(next);
+  persistData('record', next);
   return next;
 }

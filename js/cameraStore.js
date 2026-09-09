@@ -1,44 +1,25 @@
 // ==================== CAMERA STORE ====================
-// Saved camera views as avatar-relative deltas (local offset from head/root).
+// Saved camera views → public/assets/data/cameras.json
 
 import { captureRelativePose } from './cameraPoseMath.js';
-
-const DB_NAME = 'edge_ai_cameras';
-const DB_VERSION = 1;
-const STORE = 'cameras';
-
-let _dbPromise = null;
-
-function openDB() {
-  if (_dbPromise) return _dbPromise;
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const os = db.createObjectStore(STORE, { keyPath: 'id' });
-        os.createIndex('addedAt', 'addedAt', { unique: false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  return _dbPromise;
-}
-
-function tx(mode) {
-  return openDB().then((db) => db.transaction(STORE, mode).objectStore(STORE));
-}
-
-function reqToPromise(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
+import { fetchData, putData } from './assetsClient.js';
 
 function makeId() {
   return `cam_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+async function readCameras() {
+  try {
+    const data = await fetchData('cameras');
+    return Array.isArray(data?.cameras) ? data.cameras : [];
+  } catch (err) {
+    console.warn('[cameraStore] read failed:', err);
+    return [];
+  }
+}
+
+async function writeCameras(cameras) {
+  await putData('cameras', { cameras });
 }
 
 /** @param {import('./sceneSetup.js').SceneSetup} sceneSetup @param {object} [vrm] */
@@ -59,32 +40,32 @@ export async function saveCamera(name, pose) {
     target: pose.target ? { ...pose.target } : undefined,
     addedAt: Date.now(),
   };
-  const store = await tx('readwrite');
-  await reqToPromise(store.put(record));
+  const cameras = await readCameras();
+  cameras.unshift(record);
+  await writeCameras(cameras);
   return record;
 }
 
 export async function listCameras() {
-  const store = await tx('readonly');
-  const all = await reqToPromise(store.getAll());
+  const all = await readCameras();
   return all.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 }
 
 export async function getCamera(id) {
-  const store = await tx('readonly');
-  return reqToPromise(store.get(id));
+  const all = await readCameras();
+  return all.find((c) => c.id === id) || null;
 }
 
 export async function deleteCamera(id) {
-  const store = await tx('readwrite');
-  await reqToPromise(store.delete(id));
+  const cameras = (await readCameras()).filter((c) => c.id !== id);
+  await writeCameras(cameras);
 }
 
 export async function renameCamera(id, name) {
-  const store = await tx('readwrite');
-  const existing = await reqToPromise(store.get(id));
-  if (!existing) throw new Error('Camera not found');
-  existing.name = name.trim() || existing.name;
-  await reqToPromise(store.put(existing));
-  return existing;
+  const cameras = await readCameras();
+  const row = cameras.find((c) => c.id === id);
+  if (!row) throw new Error('Camera not found');
+  row.name = (name || '').trim() || row.name;
+  await writeCameras(cameras);
+  return row;
 }

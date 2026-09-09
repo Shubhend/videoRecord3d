@@ -1,8 +1,10 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { assetsDiskPlugin } from './scripts/assetsDiskPlugin.js';
 
 export default defineConfig({
   base: './',
+  plugins: [assetsDiskPlugin()],
   server: {
     allowedHosts: ['video.lovetoreads.com']
   },

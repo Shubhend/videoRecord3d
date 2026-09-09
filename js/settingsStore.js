@@ -1,12 +1,13 @@
 // ==================== SETTINGS STORE ====================
 // Per-part sensitivity, enable/disable toggles, and smoothing controls.
-// Persisted to localStorage and synced across tabs.
+// Persisted to public/assets/data/settings.json (via assets API).
+// localStorage is kept as a sync cache for same-tab reads.
+
+import { fetchData, putData, persistData } from './assetsClient.js';
 
 const KEY = 'edge_ai_settings_v1';
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  // Multipliers applied to the base dampener for each part. 1.0 = stock behavior.
-  // Range used in UI: 0..2 (0% .. 200%).
   sensitivity: {
     head: 1.0,
     mouth: 1.0,
@@ -21,12 +22,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     leftHand: 1.0,
     rightHand: 1.0,
     fingers: 1.0,
-    distance: 1.0, // how strongly user proximity moves the avatar toward/away
-    autoRelax: 1.0, // speed at which lost-tracking body parts drift back to rest
-    audioLipSync: 1.8, // boost factor for audio-driven mouth motion (0..3)
-    expressions: 1.0, // brow / frown / smile from face landmarks (0..2)
+    distance: 1.0,
+    autoRelax: 1.0,
+    audioLipSync: 1.8,
+    expressions: 1.0,
   },
-  // Per-part on/off toggles.
   enabled: {
     head: true,
     mouth: true,
@@ -46,7 +46,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
     audioLipSync: true,
     expressions: true,
   },
-  // Lerp amounts applied per part. Lower = smoother (laggier), higher = snappier (twitchier).
   smoothing: {
     face: 0.22,
     pose: 0.2,
@@ -54,52 +53,39 @@ export const DEFAULT_SETTINGS = Object.freeze({
     fingers: 0.18,
     legs: 0.16,
   },
-  /** MediaPipe + temporal stabilization (reduces flicker like Meet-style filters). */
   trackingMedia: {
     modelComplexity: 1,
     minDetectionConfidence: 0.72,
     minTrackingConfidence: 0.72,
     smoothLandmarks: true,
-    /** 0..1 — higher = smoother body motion. */
     poseStabilization: 0.62,
-    /** Legacy single hand slider — used when wrist/finger not set. */
     handStabilization: 0.5,
     wristStabilization: 0.4,
     fingerStabilization: 0.52,
     faceStabilization: 0.48,
-    /** Keep last good pose/hand when visibility dips briefly (ms). */
     holdMs: 380,
     lostTrackingMs: 450,
     visibilityLegs: 0.42,
     visibilityArms: 0.38,
     visibilityHips: 0.12,
-    /** 640 or 1280 — higher can improve hands/face at CPU cost. */
     cameraWidth: 640,
     cameraHeight: 480,
   },
-  // Live scene options (not sensitivity sliders).
   scene: {
-    /** When false, hides the floor mesh, grid, and shadow-receiver plane. */
     showGround: true,
-    /** Floor plane color (MeshStandardMaterial on the ground). */
     floorColor: '#555555',
-    /** Optional tint multiplied with each mesh material color (textures preserved). */
     modelSurface: {
       enabled: false,
       color: '#e8c4a8',
     },
-    /** center | north | south | east | southEast */
     avatarPlacement: 'east',
   },
-  // Saved camera views — random cuts during record / audio (see cameras.html).
   camera: {
     enabled: true,
     autoOnAudio: true,
     autoOnRecord: true,
     autoOnLive: false,
-    /** 'random' = switch between saved views; 'hold' = one random view for the whole session. */
     changeMode: 'random',
-    /** 0.03 = very smooth/slow, 0.2 = snappier. */
     smoothness: 0.06,
     shotMinSec: 4,
     shotMaxSec: 9,
@@ -111,6 +97,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 const listeners = new Set();
 let _cached = null;
+let _hydratePromise = null;
 
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -129,7 +116,7 @@ function deepMerge(target, source) {
   return target;
 }
 
-function loadFromStorage() {
+function loadFromLocalCache() {
   try {
     const raw = localStorage.getItem(KEY);
     return raw ? JSON.parse(raw) : {};
@@ -138,7 +125,14 @@ function loadFromStorage() {
   }
 }
 
-/** Ensure trackingMedia is always a full object (null in storage breaks saves). */
+function writeLocalCache(settings) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(settings));
+  } catch {
+    // ignore
+  }
+}
+
 function normalizeSettings(settings) {
   const def = DEFAULT_SETTINGS.trackingMedia;
   const tm = settings.trackingMedia;
@@ -160,15 +154,46 @@ function normalizeSettings(settings) {
   return changed;
 }
 
+function persistDisk(settings) {
+  persistData('settings', settings);
+}
+
+/** Load settings from public/assets/data/settings.json into the sync cache. */
+export function hydrateSettings() {
+  if (_hydratePromise) return _hydratePromise;
+  _hydratePromise = (async () => {
+    try {
+      const disk = await fetchData('settings');
+      if (disk && typeof disk === 'object' && Object.keys(disk).length > 0) {
+        _cached = deepMerge(clone(DEFAULT_SETTINGS), disk);
+        normalizeSettings(_cached);
+        writeLocalCache(_cached);
+        return _cached;
+      }
+    } catch (err) {
+      console.warn('[settingsStore] disk hydrate failed, using local cache:', err);
+    }
+    _cached = deepMerge(clone(DEFAULT_SETTINGS), loadFromLocalCache());
+    normalizeSettings(_cached);
+    // Migrate existing localStorage into assets folder once.
+    try {
+      await putData('settings', _cached);
+    } catch {
+      /* ignore */
+    }
+    return _cached;
+  })();
+  return _hydratePromise;
+}
+
+// Kick off hydrate early.
+hydrateSettings();
+
 export function getSettings() {
   if (_cached) return _cached;
-  _cached = deepMerge(clone(DEFAULT_SETTINGS), loadFromStorage());
+  _cached = deepMerge(clone(DEFAULT_SETTINGS), loadFromLocalCache());
   if (normalizeSettings(_cached)) {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(_cached));
-    } catch {
-      // ignore
-    }
+    writeLocalCache(_cached);
   }
   return _cached;
 }
@@ -178,7 +203,6 @@ export function getTrackingMedia() {
   return { ...clone(DEFAULT_SETTINGS.trackingMedia), ...tm };
 }
 
-/** Merge partial keys into `trackingMedia` without dropping other fields. */
 export function patchTrackingMedia(partial) {
   const trackingMedia = { ...getTrackingMedia(), ...partial };
   return setSettings({ trackingMedia });
@@ -188,11 +212,8 @@ export function setSettings(partial) {
   const next = deepMerge(clone(getSettings()), partial);
   normalizeSettings(next);
   _cached = next;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // ignore (private mode etc.)
-  }
+  writeLocalCache(next);
+  persistDisk(next);
   listeners.forEach((cb) => {
     try {
       cb(next);
@@ -211,6 +232,8 @@ export function resetSettings() {
   }
   _cached = clone(DEFAULT_SETTINGS);
   normalizeSettings(_cached);
+  writeLocalCache(_cached);
+  persistDisk(_cached);
   listeners.forEach((cb) => {
     try {
       cb(_cached);
@@ -221,10 +244,6 @@ export function resetSettings() {
   return _cached;
 }
 
-/**
- * Subscribe to settings changes (same tab + cross-tab via storage event).
- * Returns an unsubscribe function.
- */
 export function onSettingsChange(cb) {
   listeners.add(cb);
   const storageHandler = (e) => {
