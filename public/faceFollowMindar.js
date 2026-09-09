@@ -68,11 +68,8 @@ const LEG_NAME_RE = /leg|foot|shoe|thigh|calf|hip|sock|boot|heel|ankle/i;
 const ARTIFACT_RE = /sticker|decal|makeup|facepaint|lineart|debug|helper|ghost/i;
 
 const DEFAULT_BODY_PARTS = {
-  showHead: true,
-  showHair: true,
-  showBody: true,
-  showArms: true,
-  showLegs: true,
+  /** Per-mesh visibility keyed by stable mesh id (uuid or name#index). */
+  meshes: {},
   headOnly: false,
 };
 const UV_MAP_URL =
@@ -103,14 +100,13 @@ const videoFeed = $('video-feed');
 const tuningPanel = $('tuning-panel');
 const bodyPanel = $('body-panel');
 const btnResetBody = $('btn-reset-body');
-const bodyPartInputs = {
-  showHead: $('bp-head'),
-  showHair: $('bp-hair'),
-  showBody: $('bp-body'),
-  showArms: $('bp-arms'),
-  showLegs: $('bp-legs'),
-  headOnly: $('bp-head-only'),
-};
+const bpMeshList = $('bp-mesh-list');
+const btnBpShowAll = $('btn-bp-show-all');
+const btnBpHideAll = $('btn-bp-hide-all');
+const btnBpHeadOnly = $('btn-bp-head-only');
+
+/** @type {{ key: string, name: string, kind: string, mesh: import('three').Mesh }[]} */
+let modelMeshEntries = [];
 
 const placementInputs = {
   posX: $('in-pos-x'),
@@ -655,7 +651,7 @@ let avatar = null;
 let modelLoaded = false;
 let running = false;
 let placement = { ...DEFAULT_PLACEMENT };
-let bodyParts = { ...DEFAULT_BODY_PARTS };
+let bodyParts = { meshes: {}, headOnly: false };
 let baseFitScale = 2;
 let faceStyleTex = null;
 let faceUvTex = null;
@@ -705,42 +701,50 @@ function setPlacementUnlocked(on) {
 
 function setBodyPartsUnlocked(on) {
   if (bodyPanel) bodyPanel.classList.toggle('locked', !on);
-  Object.values(bodyPartInputs).forEach((el) => {
-    if (el) el.disabled = !on;
-  });
   if (btnResetBody) btnResetBody.disabled = !on;
+  if (btnBpShowAll) btnBpShowAll.disabled = !on;
+  if (btnBpHideAll) btnBpHideAll.disabled = !on;
+  if (btnBpHeadOnly) btnBpHeadOnly.disabled = !on;
+  bpMeshList?.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+    el.disabled = !on;
+  });
 }
 
 function loadBodyParts() {
   try {
     const raw = localStorage.getItem(BODY_PARTS_KEY);
-    if (raw) bodyParts = { ...DEFAULT_BODY_PARTS, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      bodyParts = {
+        meshes: parsed.meshes && typeof parsed.meshes === 'object' ? { ...parsed.meshes } : {},
+        headOnly: !!parsed.headOnly,
+      };
+      // Migrate legacy category flags into empty meshes map (applied after model load).
+      if (!parsed.meshes && (parsed.showHead != null || parsed.showBody != null)) {
+        bodyParts._legacy = {
+          showHead: parsed.showHead !== false,
+          showHair: parsed.showHair !== false,
+          showBody: parsed.showBody !== false,
+          showArms: parsed.showArms !== false,
+          showLegs: parsed.showLegs !== false,
+          headOnly: !!parsed.headOnly,
+        };
+      }
+    }
   } catch {
-    bodyParts = { ...DEFAULT_BODY_PARTS };
+    bodyParts = { ...DEFAULT_BODY_PARTS, meshes: {} };
   }
 }
 
 function saveBodyParts() {
   try {
-    localStorage.setItem(BODY_PARTS_KEY, JSON.stringify(bodyParts));
+    const toSave = {
+      meshes: bodyParts.meshes || {},
+      headOnly: !!bodyParts.headOnly,
+    };
+    localStorage.setItem(BODY_PARTS_KEY, JSON.stringify(toSave));
   } catch {
     /* ignore */
-  }
-}
-
-function syncBodyPartsFromInputs() {
-  for (const key of Object.keys(bodyPartInputs)) {
-    const el = bodyPartInputs[key];
-    if (!el || el.type !== 'checkbox') continue;
-    bodyParts[key] = el.checked;
-  }
-}
-
-function syncInputsFromBodyParts() {
-  for (const key of Object.keys(bodyPartInputs)) {
-    const el = bodyPartInputs[key];
-    if (!el || el.type !== 'checkbox') continue;
-    el.checked = bodyParts[key] !== false;
   }
 }
 
@@ -755,57 +759,190 @@ function meshKind(mesh) {
   return 'other';
 }
 
+function meshStableKey(mesh, index, nameCounts) {
+  const base = String(mesh.name || '').trim() || `unnamed_${index}`;
+  const n = (nameCounts[base] = (nameCounts[base] || 0) + 1);
+  return n === 1 ? base : `${base}#${n}`;
+}
+
+function meshLabel(mesh, index) {
+  const name = String(mesh.name || '').trim();
+  return name || `Unnamed mesh ${index + 1}`;
+}
+
+function collectModelMeshes() {
+  modelMeshEntries = [];
+  if (!avatar) return modelMeshEntries;
+  const root = avatar.displayRoot ?? avatar.vrm?.scene ?? avatar.gltf?.scene;
+  if (!root) return modelMeshEntries;
+  const nameCounts = Object.create(null);
+  let i = 0;
+  root.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const kind = meshKind(obj);
+    if (kind === 'artifact') return;
+    const key = meshStableKey(obj, i, nameCounts);
+    modelMeshEntries.push({
+      key,
+      name: meshLabel(obj, i),
+      kind,
+      mesh: obj,
+    });
+    i += 1;
+  });
+  return modelMeshEntries;
+}
+
+function defaultVisibleForKind(kind, legacy) {
+  if (!legacy) return true;
+  if (legacy.headOnly) return kind === 'head' || kind === 'hair';
+  switch (kind) {
+    case 'head':
+      return legacy.showHead !== false;
+    case 'hair':
+      return legacy.showHair !== false;
+    case 'body':
+      return legacy.showBody !== false;
+    case 'arms':
+      return legacy.showArms !== false;
+    case 'legs':
+      return legacy.showLegs !== false;
+    default:
+      return legacy.showBody !== false || legacy.showHead !== false;
+  }
+}
+
+function ensureMeshVisibilityMap() {
+  if (!bodyParts.meshes || typeof bodyParts.meshes !== 'object') {
+    bodyParts.meshes = {};
+  }
+  const legacy = bodyParts._legacy;
+  for (const entry of modelMeshEntries) {
+    if (bodyParts.meshes[entry.key] === undefined) {
+      // Prefer matching by mesh name from older saves if present.
+      const byName = Object.entries(bodyParts.meshes).find(([k]) => k === entry.name);
+      if (byName) {
+        bodyParts.meshes[entry.key] = byName[1] !== false;
+      } else {
+        bodyParts.meshes[entry.key] = defaultVisibleForKind(entry.kind, legacy);
+      }
+    }
+  }
+  if (legacy) delete bodyParts._legacy;
+}
+
+function rebuildBodyPartCheckboxes() {
+  if (!bpMeshList) return;
+  collectModelMeshes();
+  ensureMeshVisibilityMap();
+
+  bpMeshList.innerHTML = '';
+  if (modelMeshEntries.length === 0) {
+    const empty = document.createElement('div');
+    empty.id = 'bp-mesh-empty';
+    empty.textContent = 'No meshes found on this model.';
+    bpMeshList.appendChild(empty);
+    return;
+  }
+
+  const unlocked = bodyPanel && !bodyPanel.classList.contains('locked');
+
+  for (const entry of modelMeshEntries) {
+    const label = document.createElement('label');
+    label.className = 'toggle';
+    label.title = `${entry.name} (${entry.kind})`;
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.meshKey = entry.key;
+    input.checked = bodyParts.meshes[entry.key] !== false;
+    input.disabled = !unlocked;
+    input.addEventListener('change', () => {
+      bodyParts.meshes[entry.key] = input.checked;
+      bodyParts.headOnly = false;
+      applyBodyPartVisibility();
+    });
+
+    const text = document.createElement('span');
+    text.textContent = entry.name;
+
+    const kind = document.createElement('span');
+    kind.className = 'bp-kind';
+    kind.textContent = entry.kind;
+
+    label.appendChild(input);
+    label.appendChild(text);
+    label.appendChild(kind);
+    bpMeshList.appendChild(label);
+  }
+}
+
+function syncBodyPartsFromInputs() {
+  if (!bpMeshList) return;
+  bpMeshList.querySelectorAll('input[data-mesh-key]').forEach((el) => {
+    const key = el.dataset.meshKey;
+    if (!key) return;
+    bodyParts.meshes[key] = el.checked;
+  });
+}
+
+function syncInputsFromBodyParts() {
+  if (!bpMeshList) return;
+  bpMeshList.querySelectorAll('input[data-mesh-key]').forEach((el) => {
+    const key = el.dataset.meshKey;
+    if (!key) return;
+    el.checked = bodyParts.meshes[key] !== false;
+  });
+}
+
+function setAllMeshesVisible(visible) {
+  ensureMeshVisibilityMap();
+  for (const entry of modelMeshEntries) {
+    bodyParts.meshes[entry.key] = !!visible;
+  }
+  bodyParts.headOnly = false;
+  syncInputsFromBodyParts();
+  applyBodyPartVisibility();
+}
+
+function applyHeadOnlyVisibility() {
+  ensureMeshVisibilityMap();
+  for (const entry of modelMeshEntries) {
+    bodyParts.meshes[entry.key] = entry.kind === 'head' || entry.kind === 'hair';
+  }
+  bodyParts.headOnly = true;
+  syncInputsFromBodyParts();
+  applyBodyPartVisibility();
+}
+
 function applyBodyPartVisibility() {
   if (!avatar) return;
   const root = avatar.displayRoot ?? avatar.vrm?.scene ?? avatar.gltf?.scene;
   if (!root) return;
 
-  if (bodyParts.headOnly) {
-    bodyParts.showHead = true;
-    bodyParts.showHair = true;
-    bodyParts.showBody = false;
-    bodyParts.showArms = false;
-    bodyParts.showLegs = false;
-    syncInputsFromBodyParts();
-  }
+  if (modelMeshEntries.length === 0) collectModelMeshes();
+  ensureMeshVisibilityMap();
 
   root.traverse((obj) => {
     if (!obj.isMesh) return;
     const kind = meshKind(obj);
-    let visible = true;
-    switch (kind) {
-      case 'artifact':
-        visible = false;
-        break;
-      case 'head':
-        visible = bodyParts.showHead;
-        break;
-      case 'hair':
-        visible = bodyParts.showHair;
-        break;
-      case 'body':
-        visible = bodyParts.showBody;
-        break;
-      case 'arms':
-        visible = bodyParts.showArms;
-        break;
-      case 'legs':
-        visible = bodyParts.showLegs;
-        break;
-      default:
-        visible = bodyParts.showBody || bodyParts.showHead;
-        break;
+    if (kind === 'artifact') {
+      obj.visible = false;
+      return;
     }
-    obj.visible = visible;
+    let entry = null;
+    for (const e of modelMeshEntries) {
+      if (e.mesh === obj) {
+        entry = e;
+        break;
+      }
+    }
+    if (!entry) {
+      obj.visible = true;
+      return;
+    }
+    obj.visible = bodyParts.meshes[entry.key] !== false;
   });
-
-  if (bodyParts.headOnly) {
-    root.traverse((obj) => {
-      if (!obj.isMesh) return;
-      const n = String(obj.name || '');
-      if (/face|hair|eye|mouth|iris|highlight/i.test(n)) obj.visible = true;
-    });
-  }
 
   saveBodyParts();
 }
@@ -1190,6 +1327,7 @@ async function loadModelFace() {
     applyAutoFitToFace(sceneRoot, avatar.vrm);
     modelPivot.add(sceneRoot);
     applyPlacement();
+    rebuildBodyPartCheckboxes();
     applyBodyPartVisibility();
 
     modelLoaded = true;
@@ -1249,6 +1387,10 @@ async function stopAll() {
   btnModel.disabled = true;
   btnStop.disabled = true;
   setPlacementUnlocked(false);
+  modelMeshEntries = [];
+  if (bpMeshList) {
+    bpMeshList.innerHTML = '<div id="bp-mesh-empty">Load a model to list its parts.</div>';
+  }
   setBodyPartsUnlocked(false);
   setRecordPanelUnlocked(false);
   updateRecordUi();
@@ -1412,7 +1554,6 @@ function bindPlacementControls() {
   loadPlacement();
   loadBodyParts();
   syncInputsFromPlacement();
-  syncInputsFromBodyParts();
   setPlacementUnlocked(false);
   setBodyPartsUnlocked(false);
 
@@ -1432,24 +1573,15 @@ function bindPlacementControls() {
     applyPlacement();
   });
 
-  const onBodyChange = (ev) => {
-    if (ev?.target?.id === 'bp-head-only' && bodyPartInputs.headOnly?.checked) {
-      if (bodyPartInputs.showBody) bodyPartInputs.showBody.checked = false;
-      if (bodyPartInputs.showArms) bodyPartInputs.showArms.checked = false;
-      if (bodyPartInputs.showLegs) bodyPartInputs.showLegs.checked = false;
-    } else if (ev?.target?.id !== 'bp-head-only' && bodyPartInputs.headOnly?.checked) {
-      bodyPartInputs.headOnly.checked = false;
-    }
-    syncBodyPartsFromInputs();
-    applyBodyPartVisibility();
-  };
-
-  Object.values(bodyPartInputs).forEach((el) => {
-    el?.addEventListener('change', onBodyChange);
-  });
+  btnBpShowAll?.addEventListener('click', () => setAllMeshesVisible(true));
+  btnBpHideAll?.addEventListener('click', () => setAllMeshesVisible(false));
+  btnBpHeadOnly?.addEventListener('click', () => applyHeadOnlyVisibility());
 
   btnResetBody?.addEventListener('click', () => {
-    bodyParts = { ...DEFAULT_BODY_PARTS };
+    bodyParts = { meshes: {}, headOnly: false };
+    for (const entry of modelMeshEntries) {
+      bodyParts.meshes[entry.key] = true;
+    }
     syncInputsFromBodyParts();
     applyBodyPartVisibility();
   });
@@ -1498,9 +1630,31 @@ function applyPresetData(preset) {
     applyPlacement();
   }
   if (preset.bodyParts && typeof preset.bodyParts === 'object') {
-    bodyParts = { ...DEFAULT_BODY_PARTS, ...preset.bodyParts };
-    syncInputsFromBodyParts();
-    if (modelLoaded) applyBodyPartVisibility();
+    const p = preset.bodyParts;
+    if (p.meshes && typeof p.meshes === 'object') {
+      bodyParts = {
+        meshes: { ...p.meshes },
+        headOnly: !!p.headOnly,
+      };
+    } else {
+      // Legacy category preset → convert after meshes are known
+      bodyParts = {
+        meshes: {},
+        headOnly: !!p.headOnly,
+        _legacy: {
+          showHead: p.showHead !== false,
+          showHair: p.showHair !== false,
+          showBody: p.showBody !== false,
+          showArms: p.showArms !== false,
+          showLegs: p.showLegs !== false,
+          headOnly: !!p.headOnly,
+        },
+      };
+    }
+    if (modelLoaded) {
+      rebuildBodyPartCheckboxes();
+      applyBodyPartVisibility();
+    }
   }
   setLastPresetId(preset.id);
 }
@@ -1570,7 +1724,10 @@ $('btn-preset-save')?.addEventListener('click', async () => {
       modelId,
       modelName,
       placement: { ...placement },
-      bodyParts: { ...bodyParts },
+      bodyParts: {
+        meshes: { ...(bodyParts.meshes || {}) },
+        headOnly: !!bodyParts.headOnly,
+      },
     });
     setLastPresetId(record.id);
     await refreshPresetDropdown();

@@ -158,6 +158,48 @@
         font-size: 12px;
         color: #9aa8b8;
       }
+      #bp-mesh-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-height: 220px;
+        overflow-y: auto;
+        margin: 8px 0;
+        padding: 6px 4px;
+        border: 1px solid #2a3544;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.2);
+      }
+      #bp-mesh-list .toggle {
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      #bp-mesh-list .toggle:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      #bp-mesh-list .bp-kind {
+        margin-left: auto;
+        font-size: 10px;
+        color: #6b7a8a;
+        text-transform: uppercase;
+      }
+      #bp-mesh-empty {
+        font-size: 11px;
+        color: #6b7a8a;
+        padding: 8px 4px;
+      }
+      .bp-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 4px;
+      }
+      .bp-actions button {
+        flex: 1;
+        min-width: 72px;
+        font-size: 11px;
+        padding: 6px 8px;
+      }
       /* blender.html — backup camera preview if main feed is hidden */
       #video-feed {
         position: fixed;
@@ -321,30 +363,17 @@
       
       <div id="body-panel" class="panel locked">
         <h3>Hide body parts (step 2)</h3>
-        <label class="toggle">
-          <input type="checkbox" id="bp-head" checked />
-          Head / face
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="bp-hair" checked />
-          Hair
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="bp-body" />
-          Torso / outfit
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="bp-arms" />
-          Arms / hands
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="bp-legs" />
-          Legs / feet
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="bp-head-only" />
-          Head only (hide rest)
-        </label>
+        <p style="margin:0 0 6px;font-size:10px;color:#9aa8b8;">
+          After the model loads, every mesh appears here. Uncheck to hide.
+        </p>
+        <div class="bp-actions">
+          <button type="button" id="btn-bp-show-all" class="secondary">Show all</button>
+          <button type="button" id="btn-bp-hide-all" class="secondary">Hide all</button>
+          <button type="button" id="btn-bp-head-only" class="secondary">Head only</button>
+        </div>
+        <div id="bp-mesh-list" aria-label="Model body parts">
+          <div id="bp-mesh-empty">Load a model to list its parts.</div>
+        </div>
         <button type="button" id="btn-reset-body" class="secondary">Reset visibility</button>
       </div>
     </div>
