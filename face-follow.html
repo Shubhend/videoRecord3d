@@ -272,6 +272,41 @@
         </div>
       </div>
 
+      <div id="sens-panel" class="panel">
+        <h3>Sensitivity &amp; smooth</h3>
+        <p style="margin:0 0 8px;font-size:10px;color:#9aa8b8;">
+          Same values as <a href="settings.html">Settings</a>. Intensity = strength. Smooth = lower is softer.
+        </p>
+        <div class="num-row">
+          <label for="sens-eyes">Eyes</label>
+          <input type="number" id="sens-eyes" min="0" max="2" step="0.05" value="1" />
+        </div>
+        <div class="num-row">
+          <label for="sens-mouth">Mouth</label>
+          <input type="number" id="sens-mouth" min="0" max="2" step="0.05" value="1" />
+        </div>
+        <div class="num-row">
+          <label for="sens-expr">Expressions</label>
+          <input type="number" id="sens-expr" min="0" max="2" step="0.05" value="1" />
+        </div>
+        <div class="num-row">
+          <label for="sens-lips">Lip-sync intensity</label>
+          <input type="number" id="sens-lips" min="0" max="3" step="0.05" value="1.8" />
+        </div>
+        <div class="num-row">
+          <label for="smooth-face">Expression smooth</label>
+          <input type="number" id="smooth-face" min="0.08" max="0.4" step="0.01" value="0.18" title="Lower = smoother" />
+        </div>
+        <div class="num-row">
+          <label for="smooth-motion">Tracking motion smooth</label>
+          <input type="number" id="smooth-motion" min="0.08" max="0.45" step="0.01" value="0.2" title="Lower = smoother head motion" />
+        </div>
+        <div class="num-row">
+          <label for="smooth-lips">Lip-sync smooth</label>
+          <input type="number" id="smooth-lips" min="0.08" max="0.5" step="0.01" value="0.2" title="Lower = smoother lips" />
+        </div>
+      </div>
+
       <div id="tuning-panel" class="panel locked">
         <h3>Model position (step 1+)</h3>
         <div class="num-row">

@@ -3,9 +3,9 @@
  */
 import { AudioLipsync } from './js/audioLipsync.js';
 import { buildPhonemeTimeline, sampleTimeline } from './faceFollowPhonemeViseme.js';
+import { getLipSyncLerp } from './faceFollowAppSettings.js';
 
 const ZERO = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
-const MOUTH_LERP = 0.28;
 
 export class AudioLipSync {
   constructor() {
@@ -175,10 +175,11 @@ export class AudioLipSync {
     }
 
     // EMA so phoneme timeline hops don't look like random mouth snaps.
+    const mouthLerp = Math.max(0.08, Math.min(0.5, getLipSyncLerp() * 1.15));
     const s = this._smoothMouth;
     for (const k of Object.keys(ZERO)) {
       const target = mouth[k] || 0;
-      s[k] = s[k] + (target - s[k]) * MOUTH_LERP;
+      s[k] = s[k] + (target - s[k]) * mouthLerp;
     }
     return { ...s };
   }

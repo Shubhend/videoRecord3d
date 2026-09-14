@@ -47,7 +47,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     expressions: true,
   },
   smoothing: {
-    face: 0.22,
+    face: 0.18,
+    /** MindAR head/face-anchor pose lerp (lower = smoother tracking motion). */
+    faceMotion: 0.2,
+    /** Audio lip-sync mouth lerp (lower = smoother lips). */
+    lipSync: 0.2,
     pose: 0.2,
     hands: 0.24,
     fingers: 0.18,

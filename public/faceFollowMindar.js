@@ -9,6 +9,11 @@ import {
   getAppExpressionSensitivities,
   buildExprSettingsFromApp,
   getFaceTrackingLerp,
+  getFaceMotionLerp,
+  getLipSyncLerp,
+  loadAppSettings,
+  patchAppSettings,
+  hydrateAppSettings,
 } from './faceFollowAppSettings.js';
 import { FaceBackground } from './faceFollowBackground.js';
 import { FaceRecorder } from './faceFollowRecorder.js';
@@ -122,12 +127,7 @@ const placementInputs = {
   scaleMul: $('in-scale'),
 };
 
-/** Match record.html / avatarRig audio mouth smoothing — lower = smoother lips. */
-const AUDIO_MOUTH_LERP = 0.22;
-/** Face-anchor pose damping (MindAR raw anchors are noisy). */
-const ANCHOR_POS_LERP = 0.22;
-const ANCHOR_ROT_LERP = 0.2;
-/** Blendshape input EMA before morph apply. */
+/** Defaults kept for reference; live values from Settings getters. */
 const BLENDSHAPE_INPUT_LERP = 0.28;
 
 /** VRoid vowel morphs only — exclude Open/Close (mth_o matches inside mth_open). */
@@ -227,8 +227,12 @@ class FaceAvatar {
   }
 
   _exprLerpFactor(forAudio = false) {
-    if (forAudio) return AUDIO_MOUTH_LERP;
+    if (forAudio) return getLipSyncLerp();
     return getFaceTrackingLerp();
+  }
+
+  _lipSyncLerp() {
+    return getLipSyncLerp();
   }
 
   async init(loadTarget) {
@@ -433,16 +437,17 @@ class FaceAvatar {
   }
 
   _applyAudioMouthMorphs(vrmWeights) {
+    const lipLerp = this._lipSyncLerp();
     const arkit = mouthWeightsToArkitMap(vrmWeights);
     if (arkit.size) {
-      this._applyMorphFromMap(arkit, { onlyMouth: true, lerp: AUDIO_MOUTH_LERP });
+      this._applyMorphFromMap(arkit, { onlyMouth: true, lerp: lipLerp });
     }
-    this._applyDirectMouthPresets(vrmWeights, AUDIO_MOUTH_LERP);
+    this._applyDirectMouthPresets(vrmWeights, lipLerp);
   }
 
   /** Drive morph targets named aa / ih / viseme_* directly (VRoid / custom GLB). */
   _applyDirectMouthPresets(vrmWeights, lerp) {
-    const mouthLerp = lerp ?? AUDIO_MOUTH_LERP;
+    const mouthLerp = lerp ?? this._lipSyncLerp();
     for (const mesh of this.morphTargetMeshes) {
       const dict = mesh.morphTargetDictionary;
       if (!dict || !mesh.morphTargetInfluences) continue;
@@ -463,11 +468,11 @@ class FaceAvatar {
         }
         if (!preset || vrmWeights[preset] == null) continue;
         const s = this.exprSettings[preset] || { enabled: true, amount: 1 };
-        const audioDrive = mouthLerp >= AUDIO_MOUTH_LERP - 0.01;
+        const audioDrive = true;
         if (!s.enabled && !audioDrive) continue;
         const target = Math.min(
           1,
-          vrmWeights[preset] * this.mouthIntensity * (audioDrive ? 1 : Number(s.amount) || 1)
+          vrmWeights[preset] * this.mouthIntensity * (Number(s.amount) || 1)
         );
         const idx = dict[morphName];
         this._setMorphInfluence(mesh, idx, target, mouthLerp);
@@ -539,6 +544,7 @@ class FaceAvatar {
 
   /** Fast mouth apply — cached morphs + soft dominant mix (less random snapping). */
   _applyAudioMouthCached(mouth) {
+    const lipLerp = this._lipSyncLerp();
     const scaled = {};
     const jawOpen = clamp01(mouth.mouthOpen ?? 0);
     for (const key of MOUTH_EXPR_KEYS) {
@@ -550,7 +556,7 @@ class FaceAvatar {
       const target = clamp01(jawOpen * this.mouthIntensity * 0.8);
       const cur = mesh.morphTargetInfluences[idx] || 0;
       mesh.morphTargetInfluences[idx] =
-        cur + (target - cur) * AUDIO_MOUTH_LERP;
+        cur + (target - cur) * lipLerp;
     }
 
     let dominant = MOUTH_EXPR_KEYS[0];
@@ -568,7 +574,7 @@ class FaceAvatar {
       const target = preset === dominant ? base : base * 0.35;
       const cur = mesh.morphTargetInfluences[idx] || 0;
       mesh.morphTargetInfluences[idx] =
-        cur + (target - cur) * AUDIO_MOUTH_LERP;
+        cur + (target - cur) * lipLerp;
     }
 
     const em = this.vrm?.expressionManager;
@@ -579,7 +585,7 @@ class FaceAvatar {
       const base = scaled[key];
       const target = key === dominant ? base : base * 0.35;
       const prev = em.getValue(vrmName) ?? 0;
-      em.setValue(vrmName, prev + (target - prev) * AUDIO_MOUTH_LERP);
+      em.setValue(vrmName, prev + (target - prev) * lipLerp);
     }
   }
 
@@ -1107,8 +1113,8 @@ function smoothFaceAnchorPose() {
     return;
   }
 
-  _smoothAnchorPos.lerp(g.position, ANCHOR_POS_LERP);
-  _smoothAnchorQuat.slerp(g.quaternion, ANCHOR_ROT_LERP);
+  _smoothAnchorPos.lerp(g.position, getFaceMotionLerp());
+  _smoothAnchorQuat.slerp(g.quaternion, getFaceMotionLerp());
   g.position.copy(_smoothAnchorPos);
   g.quaternion.copy(_smoothAnchorQuat);
 }
@@ -1137,10 +1143,14 @@ function getExpressionOptions() {
     app.audioLipSyncMultiplier,
     app.mouthIntensity,
     app.faceIntensity,
+    app.eyesIntensity,
     app.expressionsEnabled,
     app.mouthEnabled,
     app.eyesEnabled,
     app.audioLipSyncEnabled,
+    getFaceTrackingLerp(),
+    getLipSyncLerp(),
+    getFaceMotionLerp(),
   ].join('|');
   if (_exprOptsCache && key === _exprOptsCacheKey) return _exprOptsCache;
 
@@ -1384,6 +1394,78 @@ async function initModelDropdown() {
   });
 }
 
+function syncSensitivityInputsFromSettings() {
+  const s = loadAppSettings();
+  const sens = s.sensitivity || {};
+  const smooth = s.smoothing || {};
+  const setVal = (id, v) => {
+    const el = $(id);
+    if (el && Number.isFinite(Number(v))) el.value = String(v);
+  };
+  setVal('sens-eyes', sens.eyes ?? 1);
+  setVal('sens-mouth', sens.mouth ?? 1);
+  setVal('sens-expr', sens.expressions ?? 1);
+  setVal('sens-lips', sens.audioLipSync ?? 1.8);
+  setVal('smooth-face', smooth.face ?? 0.18);
+  setVal('smooth-motion', smooth.faceMotion ?? 0.2);
+  setVal('smooth-lips', smooth.lipSync ?? 0.2);
+}
+
+function applySensitivityFromInputs() {
+  const num = (id, fallback) => {
+    const v = Number($(id)?.value);
+    return Number.isFinite(v) ? v : fallback;
+  };
+  patchAppSettings({
+    sensitivity: {
+      eyes: num('sens-eyes', 1),
+      mouth: num('sens-mouth', 1),
+      expressions: num('sens-expr', 1),
+      audioLipSync: num('sens-lips', 1.8),
+    },
+    smoothing: {
+      face: num('smooth-face', 0.18),
+      faceMotion: num('smooth-motion', 0.2),
+      lipSync: num('smooth-lips', 0.2),
+    },
+  });
+  invalidateExpressionOptionsCache();
+  const app = getAppExpressionSensitivities();
+  if (audioLip) audioLip.setIntensity(app.audioLipSyncMultiplier);
+  if (avatar) avatar.setExpressionOptions(getExpressionOptions());
+}
+
+function bindSensitivityPanel() {
+  syncSensitivityInputsFromSettings();
+  hydrateAppSettings().then(() => syncSensitivityInputsFromSettings());
+
+  const ids = [
+    'sens-eyes',
+    'sens-mouth',
+    'sens-expr',
+    'sens-lips',
+    'smooth-face',
+    'smooth-motion',
+    'smooth-lips',
+  ];
+  for (const id of ids) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('input', applySensitivityFromInputs);
+    el.addEventListener('change', applySensitivityFromInputs);
+  }
+
+  window.addEventListener('storage', (e) => {
+    if (e.key !== 'edge_ai_settings_v1') return;
+    invalidateExpressionOptionsCache();
+    syncSensitivityInputsFromSettings();
+  });
+  window.addEventListener('edge-ai-settings', () => {
+    invalidateExpressionOptionsCache();
+    syncSensitivityInputsFromSettings();
+  });
+}
+
 function bindExtendedUi() {
   if (!audioLip) audioLip = new AudioLipSync();
   if (!background && container) background = new FaceBackground(container);
@@ -1432,6 +1514,8 @@ function bindExtendedUi() {
   if ($('bg-mode') && background) $('bg-mode').value = background.config.mode;
   if ($('bg-color') && background) $('bg-color').value = background.config.color;
   if ($('bg-blur') && background) $('bg-blur').value = background.config.blurPx;
+
+  bindSensitivityPanel();
 
   $('audio-file')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];

@@ -1,8 +1,8 @@
 /**
- * Reads the same sensitivity / enable flags as js/settingsStore.js (Settings page).
- * Source of truth: public/assets/data/settings.json (via assets API).
+ * Reads/writes the same settings as js/settingsStore.js for face-follow.
+ * Source of truth: localStorage + public/assets/data/settings.json
  */
-import { fetchData } from '../js/assetsClient.js';
+import { fetchData, putData, persistData } from '../js/assetsClient.js';
 
 const SETTINGS_KEY = 'edge_ai_settings_v1';
 
@@ -12,12 +12,18 @@ const DEFAULTS = {
     eyes: 1,
     expressions: 1,
     audioLipSync: 1.8,
+    pupils: 1,
   },
   enabled: {
     mouth: true,
     eyes: true,
     expressions: true,
     audioLipSync: true,
+  },
+  smoothing: {
+    face: 0.18,
+    faceMotion: 0.2,
+    lipSync: 0.2,
   },
 };
 
@@ -85,19 +91,40 @@ export function loadAppSettings() {
   }
 }
 
+/** Merge partial settings and persist (localStorage + assets/data/settings.json). */
+export function patchAppSettings(partial) {
+  const cur = loadAppSettings();
+  const next = deepMerge(cur, partial || {});
+  _cached = next;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+  persistData('settings', next);
+  try {
+    window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
+  } catch {
+    window.dispatchEvent(new CustomEvent('edge-ai-settings', { detail: next }));
+  }
+  return next;
+}
+
 /** Face / mouth / audio lip-sync multipliers from Settings → Face sensitivity. */
 export function getAppExpressionSensitivities() {
   const s = loadAppSettings();
   const sens = s.sensitivity || {};
   const en = s.enabled || {};
   const mouth = Number(sens.mouth) || 1;
-  const audioBoost =
+  const lip =
     en.audioLipSync !== false ? Number(sens.audioLipSync) || 1.8 : 1;
   return {
     faceIntensity: Number(sens.expressions) || 1,
     eyesIntensity: Number(sens.eyes) || 1,
     mouthIntensity: mouth,
-    audioLipSyncMultiplier: audioBoost * mouth,
+    /** Lip-sync intensity alone (does not multiply mouth) — clearer control. */
+    audioLipSyncMultiplier: lip,
+    pupilsIntensity: Number(sens.pupils) || 1,
     expressionsEnabled: en.expressions !== false,
     eyesEnabled: en.eyes !== false,
     mouthEnabled: en.mouth !== false,
@@ -105,7 +132,7 @@ export function getAppExpressionSensitivities() {
   };
 }
 
-/** Per-viseme toggles derived from Settings (replaces face-follow expression panel). */
+/** Per-viseme toggles derived from Settings. */
 export function buildExprSettingsFromApp(app) {
   const mouthKeys = ['aa', 'ih', 'ou', 'ee', 'oh'];
   const eyeKeys = [
@@ -128,10 +155,23 @@ export function buildExprSettingsFromApp(app) {
   return out;
 }
 
-/** Lower = smoother face expressions (settings.smoothing.face is already a lerp factor). */
+function clampLerp(v, lo, hi, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/** Expression morph lerp — lower = smoother. */
 export function getFaceTrackingLerp() {
-  const smooth = Number(loadAppSettings().smoothing?.face);
-  const s = Number.isFinite(smooth) ? smooth : 0.18;
-  // Cap so MindAR blendshape noise does not look like random twitching.
-  return Math.max(0.08, Math.min(0.32, s * 0.85));
+  return clampLerp(loadAppSettings().smoothing?.face, 0.08, 0.4, 0.18);
+}
+
+/** Head / face-anchor motion lerp — lower = smoother tracking. */
+export function getFaceMotionLerp() {
+  return clampLerp(loadAppSettings().smoothing?.faceMotion, 0.08, 0.45, 0.2);
+}
+
+/** Audio lip-sync mouth lerp — lower = smoother lips. */
+export function getLipSyncLerp() {
+  return clampLerp(loadAppSettings().smoothing?.lipSync, 0.08, 0.5, 0.2);
 }

@@ -31,8 +31,8 @@ const ROWS = {
     },
     {
       key: 'audioLipSync',
-      label: 'Audio Lip-Sync Intensity',
-      hint: 'Boost factor for the mouth motion when an audio file is driving lip-sync. Higher = more dramatic mouth movement (range 0–300%).',
+      label: 'Lip-Sync Intensity',
+      hint: 'How strong the mouth moves when audio drives lip-sync (face-follow). Independent of face Mouth sensitivity. Range 0–300%.',
       max: 3,
     },
   ],
@@ -61,6 +61,33 @@ const ROWS = {
       key: 'autoRelax',
       label: 'Smooth Return to Rest',
       hint: 'When tracking is briefly lost (face turns away, hand off-screen), drift those body parts back to a neutral pose instead of freezing in the last detected position. Sensitivity controls how quickly bones return — higher = snaps back fast, lower = lingers longer.',
+    },
+  ],
+  /** Face-follow lerp rows: stored under settings.smoothing, lower = smoother. */
+  faceSmooth: [
+    {
+      key: 'face',
+      label: 'Expression response',
+      hint: 'How quickly blinks / brows / smile follow your face. Lower = smoother (less twitchy), higher = snappier.',
+      min: 0.08,
+      max: 0.4,
+      step: 0.01,
+    },
+    {
+      key: 'faceMotion',
+      label: 'Tracking motion smooth',
+      hint: 'How smoothly the head/avatar follows your face position (face-follow). Lower = smoother motion, higher = sticks closer to raw tracking.',
+      min: 0.08,
+      max: 0.45,
+      step: 0.01,
+    },
+    {
+      key: 'lipSync',
+      label: 'Lip-sync smooth',
+      hint: 'How smoothly the mouth moves during audio lip-sync. Lower = softer lips, higher = faster viseme changes.',
+      min: 0.08,
+      max: 0.5,
+      step: 0.01,
     },
   ],
   camera: [
@@ -243,6 +270,52 @@ function bindCameraCheckboxes() {
   });
 }
 
+function buildSmoothLerpRow(def, settings) {
+  const smooth = settings.smoothing || {};
+  const val = Number(smooth[def.key] ?? def.min ?? 0.2);
+  const min = Number(def.min ?? 0.08);
+  const max = Number(def.max ?? 0.4);
+  const step = def.step ?? 0.01;
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <div class="row-label">
+      <div>
+        <span class="label-text">${def.label}</span>
+        <span class="label-hint">${def.hint}</span>
+      </div>
+    </div>
+    <input
+      type="number" min="${min}" max="${max}" step="${step}"
+      class="num-input"
+      data-smooth-num="${def.key}"
+      value="${val}"
+    />
+  `;
+  return row;
+}
+
+function renderFaceSmoothPanel() {
+  const settings = getSettings();
+  const container = document.getElementById('rows-face-smooth');
+  if (!container) return;
+  container.innerHTML = '';
+  ROWS.faceSmooth.forEach((def) => container.appendChild(buildSmoothLerpRow(def, settings)));
+
+  container.querySelectorAll('input[data-smooth-num]').forEach((input) => {
+    const key = input.dataset.smoothNum;
+    const save = () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      setSettings({ smoothing: { [key]: v } });
+      showToast(`${labelFor(key)}: ${v.toFixed(2)}`);
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
+  });
+}
+
 function render() {
   const settings = getSettings();
   renderInto('rows-face', ROWS.face, settings);
@@ -250,6 +323,7 @@ function render() {
   renderInto('rows-hands', ROWS.hands, settings);
   renderInto('rows-presence', ROWS.presence, settings);
   renderInto('rows-smoothing', ROWS.smoothing, settings);
+  renderFaceSmoothPanel();
   renderCameraPanel();
   bindRowEvents();
 }

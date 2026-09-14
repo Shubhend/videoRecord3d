@@ -433,10 +433,23 @@
         <div class="panel-header">
           <div>
             <div class="panel-title">Face &amp; Head</div>
-            <div class="panel-desc">Head rotation, blink intensity, mouth shapes, and eye look-at.</div>
+            <div class="panel-desc">Head rotation, blink intensity, mouth shapes, eye look-at, and lip-sync intensity.</div>
           </div>
         </div>
         <div id="rows-face"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Face tracking &amp; lip-sync smooth</div>
+            <div class="panel-desc">
+              Used by <a href="face-follow.html" style="color:var(--accent);">face-follow</a>.
+              Lower values = smoother / less twitchy. Higher = snappier / follows tracking more tightly.
+            </div>
+          </div>
+        </div>
+        <div id="rows-face-smooth"></div>
       </section>
 
       <section class="panel">
