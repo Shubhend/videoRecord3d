@@ -938,35 +938,40 @@ function setFaceMeshStyle(showUvDebug) {
 
 function ensureTransparentCanvas() {
   if (!renderer) return;
-  renderer.setClearColor(0x000000, 0);
   renderer.toneMapping = THREE.NoToneMapping;
   if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1;
   renderer.domElement.style.background = 'transparent';
-  // Do not clear scene.background here — syncThreeBackground owns it.
+  // Clear color is owned by syncThreeBackground (transparent vs solid).
 }
 
 /**
- * Solid color must live on the Three.js scene: MindAR's WebGL canvas is often
- * opaque, so a CSS color behind it never shows. Image/camera use CSS layers.
+ * Solid color:
+ *  - CSS overlay between video and canvas (works when WebGL has alpha)
+ *  - scene.background (works when WebGL canvas is opaque)
+ * Never alter MindAR video layout — that breaks face-mesh alignment.
  */
 function syncThreeBackground() {
+  background?.ensureMounted?.();
+  background?.apply?.();
+
   if (!scene || !renderer) return;
   const mode = background?.config?.mode || 'camera';
   const color = background?.config?.color || '#0a0e14';
 
   if (mode === 'color') {
+    let threeColor;
     try {
-      scene.background = new THREE.Color(color);
+      threeColor = new THREE.Color(color);
     } catch {
-      scene.background = new THREE.Color(0x0a0e14);
+      threeColor = new THREE.Color(0x0a0e14);
     }
-    renderer.setClearColor(new THREE.Color(color), 1);
+    scene.background = threeColor;
+    renderer.setClearColor(threeColor, 1);
   } else {
     scene.background = null;
     renderer.setClearColor(0x000000, 0);
+    renderer.domElement.style.background = 'transparent';
   }
-  background?.ensureMounted?.();
-  background?.apply?.();
 }
 
 function wireBackgroundCallbacks() {
@@ -1127,6 +1132,16 @@ function updateRecordUi() {
 
 function onLoop() {
   keepModelVisible();
+  // Re-assert solid color each frame in case MindAR resets scene.background.
+  if (background?.config?.mode === 'color' && scene && renderer) {
+    try {
+      const threeColor = new THREE.Color(background.config.color || '#0a0e14');
+      scene.background = threeColor;
+      renderer.setClearColor(threeColor, 1);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const estimate = mindarThree?.getLatestEstimate?.();
   if (avatar) {

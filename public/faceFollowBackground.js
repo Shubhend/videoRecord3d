@@ -7,6 +7,11 @@ import {
 
 const BG_KEY = 'faceFollowBackground_v1';
 
+/**
+ * Background overlay sits BETWEEN the MindAR camera <video> and the WebGL
+ * <canvas> so solid color / image cover the camera without changing video
+ * layout (which would break face-mesh alignment).
+ */
 export class FaceBackground {
   constructor(containerEl) {
     this.container = containerEl;
@@ -23,7 +28,6 @@ export class FaceBackground {
     this.config = this.load();
     this.imageUrl = null;
     this._userTouched = false;
-    /** Optional: () => void — called after config changes so host can sync Three.js scene.background */
     this.onChange = null;
 
     this.ensureMounted();
@@ -31,14 +35,33 @@ export class FaceBackground {
     this.hydrateFromDisk();
   }
 
-  /** Keep backdrop nodes as first children of #container (MindAR may wipe/rebuild DOM). */
+  /**
+   * Place overlays just before the WebGL canvas (after the video).
+   * Never change video position/size/transform — MindAR needs those intact.
+   */
   ensureMounted() {
     if (!this.container) return;
+    const canvas = this.container.querySelector('canvas');
+    const anchor = canvas || null;
+
     if (this.backdrop.parentNode !== this.container) {
-      this.container.insertBefore(this.backdrop, this.container.firstChild);
+      if (anchor) this.container.insertBefore(this.backdrop, anchor);
+      else this.container.appendChild(this.backdrop);
+    } else if (anchor && this.backdrop.nextSibling !== this.bgImage && this.backdrop.nextSibling !== anchor) {
+      this.container.insertBefore(this.backdrop, anchor);
     }
+
     if (this.bgImage.parentNode !== this.container) {
-      this.container.insertBefore(this.bgImage, this.backdrop.nextSibling);
+      if (anchor) this.container.insertBefore(this.bgImage, anchor);
+      else this.container.appendChild(this.bgImage);
+    } else if (anchor && this.bgImage.nextSibling !== anchor) {
+      this.container.insertBefore(this.bgImage, anchor);
+    }
+
+    // Keep order: … video → backdrop → image → canvas
+    if (anchor) {
+      this.container.insertBefore(this.backdrop, anchor);
+      this.container.insertBefore(this.bgImage, anchor);
     }
   }
 
@@ -167,7 +190,6 @@ export class FaceBackground {
     this.setConfig({ mode: 'camera', imageFile: null });
   }
 
-  /** Image element for live view + recording composite. */
   getImageElement() {
     if (this.config.mode !== 'image' || !this.imageUrl) return null;
     if (!this.bgImage.complete || !this.bgImage.naturalWidth) return null;
@@ -185,46 +207,31 @@ export class FaceBackground {
     this.ensureMounted();
 
     const { mode, blurPx, color } = this.config;
-    const hideCamera = mode === 'color' || mode === 'image';
-    this.container.classList.toggle('bg-hide-camera', hideCamera);
 
-    this.backdrop.style.backgroundImage = 'none';
+    // Reset overlay
+    this.backdrop.style.display = 'none';
     this.backdrop.style.backgroundColor = 'transparent';
-    this.container.style.backgroundColor = 'transparent';
+    this.backdrop.style.backgroundImage = 'none';
+    this.bgImage.style.display = 'none';
 
     if (mode === 'color') {
-      const c = color || '#0a0e14';
-      this.backdrop.style.backgroundColor = c;
-      this.container.style.backgroundColor = c;
-      this.bgImage.style.display = 'none';
+      this.backdrop.style.display = 'block';
+      this.backdrop.style.backgroundColor = color || '#0a0e14';
     } else if (mode === 'image' && this.imageUrl) {
       this.bgImage.style.display = 'block';
       if (this.bgImage.src !== this.imageUrl) this.bgImage.src = this.imageUrl;
-    } else {
-      this.bgImage.style.display = 'none';
     }
 
-    // Style every camera video MindAR may inject
-    this.container.querySelectorAll('video').forEach((video) => {
-      video.style.pointerEvents = 'none';
-      if (hideCamera) {
-        video.style.visibility = 'hidden';
-        video.style.opacity = '0';
-        video.style.filter = 'none';
-        video.style.transform = 'scaleX(-1)';
-      } else if (mode === 'blur') {
-        video.style.visibility = 'visible';
-        video.style.opacity = '1';
+    // Blur only — never rewrite video transform/size (breaks MindAR face alignment).
+    const video = this.container.querySelector('video');
+    if (video) {
+      if (mode === 'blur') {
         const px = Math.max(0, Math.min(40, Number(blurPx) || 12));
         video.style.filter = `blur(${px}px)`;
-        video.style.transform = 'scaleX(-1) scale(1.08)';
       } else {
-        video.style.visibility = 'visible';
-        video.style.opacity = '1';
         video.style.filter = 'none';
-        video.style.transform = 'scaleX(-1)';
       }
-    });
+    }
   }
 
   draw(ctx, w, h) {
