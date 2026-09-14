@@ -106,14 +106,14 @@ export function featuresToVisemes(f, intensity = 1) {
   return out;
 }
 
-/** Competitive viseme mix — one dominant vowel at a time (clearer lip-sync). */
+/** Competitive viseme mix — softer than hard one-hot so lips stay natural. */
 export function sharpenVisemes(mouth) {
   const keys = ['aa', 'ih', 'ou', 'ee', 'oh'];
   const open = mouth.mouthOpen ?? Math.max(...keys.map((k) => mouth[k] || 0));
-  if (open < 0.04) {
+  if (open < 0.03) {
     return { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
   }
-  const bias = { aa: 1.15, ih: 1.12, ee: 1.08, ou: 1.05, oh: 0.55 };
+  const bias = { aa: 1.1, ih: 1.08, ee: 1.05, ou: 1.02, oh: 0.7 };
   let best = keys[0];
   let bestV = -1;
   for (const k of keys) {
@@ -126,13 +126,13 @@ export function sharpenVisemes(mouth) {
   const out = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: open };
   for (const k of keys) {
     const v = mouth[k] || 0;
-    out[k] = clamp01(v * (k === best ? 1.12 : 0.18));
+    out[k] = clamp01(v * (k === best ? 1.05 : 0.42));
   }
-  out.aa = clamp01(Math.max(out.aa, open * 0.82));
+  out.aa = clamp01(Math.max(out.aa, open * 0.55));
   if (best === 'aa') {
-    out.aa = clamp01(Math.max(out.aa, open * 0.92));
+    out.aa = clamp01(Math.max(out.aa, open * 0.75));
   } else if (best !== 'oh' && best !== 'ou') {
-    out[best] = clamp01(Math.max(out[best], open * 0.55));
+    out[best] = clamp01(Math.max(out[best], open * 0.4));
   }
   return out;
 }
@@ -154,8 +154,8 @@ export function lerpVisemes(a, b, t) {
 export function buildPhonemeTimeline(audioBuffer, intensity = 1) {
   const data = audioBuffer.getChannelData(0);
   const sr = audioBuffer.sampleRate;
-  const hopSec = 0.04;
-  const winSec = 0.06;
+  const hopSec = 0.03;
+  const winSec = 0.05;
   const hop = Math.max(256, Math.floor(sr * hopSec));
   const win = Math.max(512, Math.floor(sr * winSec));
   const timeline = [];
@@ -170,6 +170,19 @@ export function buildPhonemeTimeline(audioBuffer, intensity = 1) {
   if (!timeline.length || timeline[timeline.length - 1].t < endT) {
     timeline.push({ t: endT, aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 });
   }
+
+  // Two-pass temporal blur so baked visemes don't flicker between hops.
+  const keys = ['aa', 'ih', 'ou', 'ee', 'oh', 'mouthOpen'];
+  for (let pass = 0; pass < 2; pass++) {
+    const copy = timeline.map((row) => ({ ...row }));
+    for (let i = 1; i < timeline.length - 1; i++) {
+      for (const k of keys) {
+        timeline[i][k] =
+          copy[i - 1][k] * 0.25 + copy[i][k] * 0.5 + copy[i + 1][k] * 0.25;
+      }
+    }
+  }
+
   return timeline;
 }
 

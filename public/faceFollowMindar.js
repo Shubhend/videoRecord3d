@@ -122,8 +122,13 @@ const placementInputs = {
   scaleMul: $('in-scale'),
 };
 
-/** Match record.html / avatarRig audio mouth smoothing. */
-const AUDIO_MOUTH_LERP = 0.5;
+/** Match record.html / avatarRig audio mouth smoothing — lower = smoother lips. */
+const AUDIO_MOUTH_LERP = 0.22;
+/** Face-anchor pose damping (MindAR raw anchors are noisy). */
+const ANCHOR_POS_LERP = 0.22;
+const ANCHOR_ROT_LERP = 0.2;
+/** Blendshape input EMA before morph apply. */
+const BLENDSHAPE_INPUT_LERP = 0.28;
 
 /** VRoid vowel morphs only — exclude Open/Close (mth_o matches inside mth_open). */
 const VROID_MOUTH_RULES = [
@@ -202,6 +207,9 @@ class FaceAvatar {
     this.vrmExprNames = new Set();
     this.smoothed = new Map();
     this.morphSmoothed = new Map();
+    this.blendshapeSmoothed = new Map();
+    this._lookYaw = 0;
+    this._lookPitch = 0;
     this.exprIntensity = 1;
     this.mouthIntensity = 1;
     this.expressionsEnabled = true;
@@ -353,6 +361,29 @@ class FaceAvatar {
     return next;
   }
 
+  /** EMA-smooth raw MindAR blendshape scores to kill frame-to-frame noise. */
+  _smoothBlendshapeMap(rawMap, lerp = BLENDSHAPE_INPUT_LERP) {
+    const out = new Map();
+    for (const [name, score] of rawMap) {
+      const target = clamp01(Number(score) || 0);
+      const prev = this.blendshapeSmoothed.get(name);
+      const next = prev == null ? target : prev + (target - prev) * lerp;
+      this.blendshapeSmoothed.set(name, next);
+      out.set(name, next);
+    }
+    // Decay keys missing this frame so expressions don't stick.
+    for (const [name, prev] of this.blendshapeSmoothed) {
+      if (out.has(name)) continue;
+      const next = prev * (1 - lerp);
+      if (next < 0.008) this.blendshapeSmoothed.delete(name);
+      else {
+        this.blendshapeSmoothed.set(name, next);
+        out.set(name, next);
+      }
+    }
+    return out;
+  }
+
   _setMorphInfluence(mesh, idx, target, lerp) {
     const factor = lerp ?? this._exprLerpFactor();
     const key = `${mesh.uuid}:inf:${idx}`;
@@ -464,18 +495,21 @@ class FaceAvatar {
     const lookAt = this.vrm?.lookAt;
     if (!lookAt?.applier) return;
     const g = (k) => clamp01(arkit.get(k));
-    const yaw =
+    const yawTarget =
       ((g('eyeLookOutLeft') + g('eyeLookInRight')) - (g('eyeLookInLeft') + g('eyeLookOutRight'))) *
-      0.35 *
+      0.28 *
       this.exprIntensity;
-    const pitch =
+    const pitchTarget =
       ((g('eyeLookUpLeft') + g('eyeLookUpRight')) - (g('eyeLookDownLeft') + g('eyeLookDownRight'))) *
-      0.35 *
+      0.28 *
       this.exprIntensity;
-    if (typeof lookAt.yaw === 'number') lookAt.yaw = yaw;
-    if (typeof lookAt.pitch === 'number') lookAt.pitch = pitch;
+    const lookLerp = Math.min(0.28, this._exprLerpFactor());
+    this._lookYaw += (yawTarget - this._lookYaw) * lookLerp;
+    this._lookPitch += (pitchTarget - this._lookPitch) * lookLerp;
+    if (typeof lookAt.yaw === 'number') lookAt.yaw = this._lookYaw;
+    if (typeof lookAt.pitch === 'number') lookAt.pitch = this._lookPitch;
     if (lookAt.applier?.lookAt) {
-      const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+      const euler = new THREE.Euler(this._lookPitch, this._lookYaw, 0, 'YXZ');
       lookAt.applier.lookAt(euler);
     }
   }
@@ -503,17 +537,17 @@ class FaceAvatar {
     return null;
   }
 
-  /** Fast mouth apply — cached morphs + VRM only (same idea as avatarRig.setMouthOverride). */
+  /** Fast mouth apply — cached morphs + soft dominant mix (less random snapping). */
   _applyAudioMouthCached(mouth) {
     const scaled = {};
     const jawOpen = clamp01(mouth.mouthOpen ?? 0);
     for (const key of MOUTH_EXPR_KEYS) {
       scaled[key] = clamp01((mouth[key] || 0) * this.mouthIntensity);
     }
-    scaled.aa = clamp01(Math.max(scaled.aa, jawOpen * 0.55));
+    scaled.aa = clamp01(Math.max(scaled.aa, jawOpen * 0.45));
 
     for (const { mesh, idx } of this._mouthOpenMorphEntries) {
-      const target = clamp01(jawOpen * this.mouthIntensity * 0.85);
+      const target = clamp01(jawOpen * this.mouthIntensity * 0.8);
       const cur = mesh.morphTargetInfluences[idx] || 0;
       mesh.morphTargetInfluences[idx] =
         cur + (target - cur) * AUDIO_MOUTH_LERP;
@@ -530,7 +564,8 @@ class FaceAvatar {
 
     for (const { mesh, idx, preset } of this._mouthMorphEntries) {
       const base = scaled[preset] || 0;
-      const target = preset === dominant ? base : base * 0.12;
+      // Soft mix: secondary shapes keep more weight so lips don't twitch between vowels.
+      const target = preset === dominant ? base : base * 0.35;
       const cur = mesh.morphTargetInfluences[idx] || 0;
       mesh.morphTargetInfluences[idx] =
         cur + (target - cur) * AUDIO_MOUTH_LERP;
@@ -542,7 +577,7 @@ class FaceAvatar {
       const vrmName = this.vrmPresetToVrm.get(key) || key;
       if (!this.vrmExprNames.has(vrmName)) continue;
       const base = scaled[key];
-      const target = key === dominant ? base : base * 0.12;
+      const target = key === dominant ? base : base * 0.35;
       const prev = em.getValue(vrmName) ?? 0;
       em.setValue(vrmName, prev + (target - prev) * AUDIO_MOUTH_LERP);
     }
@@ -562,10 +597,11 @@ class FaceAvatar {
   updateFaceExpressionsLive(blendshapes) {
     if (!this.expressionsEnabled || !blendshapes?.categories?.length) return;
 
-    const arkit = new Map();
+    const raw = new Map();
     for (const cat of blendshapes.categories) {
-      arkit.set(cat.categoryName, cat.score);
+      raw.set(cat.categoryName, cat.score);
     }
+    const arkit = this._smoothBlendshapeMap(raw);
 
     for (const { mesh, arkitName, idx } of this._faceMorphBindings) {
       const score = arkit.get(arkitName);
@@ -591,10 +627,11 @@ class FaceAvatar {
   updateBlendshapes(blendshapes) {
     if (!blendshapes?.categories) return;
 
-    const arkit = new Map();
+    const raw = new Map();
     for (const cat of blendshapes.categories) {
-      arkit.set(cat.categoryName, cat.score);
+      raw.set(cat.categoryName, cat.score);
     }
+    const arkit = this._smoothBlendshapeMap(raw);
 
     const vrmWeights = arkitToVrmExpressionWeights(arkit);
     const audioMouth =
@@ -651,6 +688,9 @@ let camera = null;
 let faceMesh = null;
 let faceAnchor = null;
 let modelPivot = null;
+let _smoothAnchorPos = null;
+let _smoothAnchorQuat = null;
+let _anchorSmoothReady = false;
 let avatar = null;
 let modelLoaded = false;
 let running = false;
@@ -1049,20 +1089,28 @@ function keepModelVisible() {
   if (faceAnchor?.group) faceAnchor.group.visible = true;
   if (modelPivot) {
     modelPivot.visible = true;
-    modelPivot.scale.set(1, 1, 1);
   }
 
-  const root = avatar?.displayRoot ?? avatar?.vrm?.scene ?? avatar?.gltf?.scene;
-  if (root) {
-    root.visible = true;
-    root.traverse((o) => {
-      if (!o.isMesh) return;
-      o.frustumCulled = false;
-      o.visible = true;
-    });
-    applyBodyPartVisibility();
+  // Do NOT force every mesh visible each frame — that fights body-part toggles
+  // and causes flicker / random-looking pops. Visibility is owned by applyBodyPartVisibility.
+}
+
+/** Dampen MindAR face-anchor pose to reduce fast random head motion. */
+function smoothFaceAnchorPose() {
+  const g = faceAnchor?.group;
+  if (!g || !modelLoaded) return;
+
+  if (!_anchorSmoothReady || !_smoothAnchorPos || !_smoothAnchorQuat) {
+    _smoothAnchorPos = g.position.clone();
+    _smoothAnchorQuat = g.quaternion.clone();
+    _anchorSmoothReady = true;
+    return;
   }
-  updateFaceShellVisibility();
+
+  _smoothAnchorPos.lerp(g.position, ANCHOR_POS_LERP);
+  _smoothAnchorQuat.slerp(g.quaternion, ANCHOR_ROT_LERP);
+  g.position.copy(_smoothAnchorPos);
+  g.quaternion.copy(_smoothAnchorQuat);
 }
 
 /** Hide colorful MindAR shell when avatar is on (stops “mask on top of face”). */
@@ -1132,6 +1180,7 @@ function updateRecordUi() {
 
 function onLoop() {
   keepModelVisible();
+  smoothFaceAnchorPose();
   // Re-assert solid color each frame in case MindAR resets scene.background.
   if (background?.config?.mode === 'color' && scene && renderer) {
     try {
@@ -1247,10 +1296,12 @@ async function loadModelFace() {
     applyBodyPartVisibility();
 
     modelLoaded = true;
+    _anchorSmoothReady = false;
     keepModelVisible();
     setBodyPartsUnlocked(true);
     setFaceMeshStyle(showMeshInput?.checked === true);
     updateFaceShellVisibility();
+    applyBodyPartVisibility();
 
     setStatus('<strong>Step 2 OK:</strong> Model on anchor — enter values below', true);
     const exprCount = avatar.vrmExprNames?.size ?? 0;
@@ -1287,6 +1338,9 @@ async function stopAll() {
   faceMesh = null;
   faceAnchor = null;
   modelPivot = null;
+  _smoothAnchorPos = null;
+  _smoothAnchorQuat = null;
+  _anchorSmoothReady = false;
   avatar = null;
   faceStyleTex = null;
   faceUvTex = null;

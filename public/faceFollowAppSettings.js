@@ -128,9 +128,10 @@ export function buildExprSettingsFromApp(app) {
   return out;
 }
 
-/** Higher = snappier face tracking (inverse of Settings smoothing.face). */
+/** Lower = smoother face expressions (settings.smoothing.face is already a lerp factor). */
 export function getFaceTrackingLerp() {
   const smooth = Number(loadAppSettings().smoothing?.face);
-  const s = Number.isFinite(smooth) ? smooth : 0.22;
-  return Math.max(0.62, Math.min(0.92, 1 - s * 0.55));
+  const s = Number.isFinite(smooth) ? smooth : 0.18;
+  // Cap so MindAR blendshape noise does not look like random twitching.
+  return Math.max(0.08, Math.min(0.32, s * 0.85));
 }

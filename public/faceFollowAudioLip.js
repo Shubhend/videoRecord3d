@@ -5,6 +5,7 @@ import { AudioLipsync } from './js/audioLipsync.js';
 import { buildPhonemeTimeline, sampleTimeline } from './faceFollowPhonemeViseme.js';
 
 const ZERO = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
+const MOUTH_LERP = 0.28;
 
 export class AudioLipSync {
   constructor() {
@@ -14,6 +15,7 @@ export class AudioLipSync {
     this._intensity = 1;
     this._phonemeTimeline = null;
     this._timelineIdx = 0;
+    this._smoothMouth = { ...ZERO };
   }
 
   static isSupported() {
@@ -84,6 +86,7 @@ export class AudioLipSync {
     if (fromStart) {
       this._engine.stop();
       this._timelineIdx = 0;
+      this._smoothMouth = { ...ZERO };
     } else {
       this._seekTimelineIndex(this._engine.getCurrentTime());
     }
@@ -110,6 +113,7 @@ export class AudioLipSync {
     this._engine?.stop();
     this.active = false;
     this._timelineIdx = 0;
+    this._smoothMouth = { ...ZERO };
   }
 
   getCaptureStream() {
@@ -152,20 +156,31 @@ export class AudioLipSync {
   }
 
   getMouthWeights() {
-    if (!this.enabled || !this._engine) return ZERO;
+    if (!this.enabled || !this._engine) {
+      this._smoothMouth = { ...ZERO };
+      return ZERO;
+    }
 
-    const mouth = this._samplePhonemeFast(this.getPlaybackTime());
-    if (mouth) return mouth;
+    let mouth = this._samplePhonemeFast(this.getPlaybackTime());
+    if (!mouth) {
+      const w = this._engine.computeWeights();
+      mouth = {
+        aa: w.A,
+        ih: w.I,
+        ou: w.U,
+        ee: w.E,
+        oh: w.O,
+        mouthOpen: w.mouthOpen,
+      };
+    }
 
-    const w = this._engine.computeWeights();
-    return {
-      aa: w.A,
-      ih: w.I,
-      ou: w.U,
-      ee: w.E,
-      oh: w.O,
-      mouthOpen: w.mouthOpen,
-    };
+    // EMA so phoneme timeline hops don't look like random mouth snaps.
+    const s = this._smoothMouth;
+    for (const k of Object.keys(ZERO)) {
+      const target = mouth[k] || 0;
+      s[k] = s[k] + (target - s[k]) * MOUTH_LERP;
+    }
+    return { ...s };
   }
 
   dispose() {
@@ -173,6 +188,7 @@ export class AudioLipSync {
     this._engine = null;
     this._phonemeTimeline = null;
     this._timelineIdx = 0;
+    this._smoothMouth = { ...ZERO };
     this.active = false;
   }
 }
