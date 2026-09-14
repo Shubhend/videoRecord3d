@@ -22,6 +22,7 @@ export class FaceBackground {
 
     this.config = this.load();
     this.imageUrl = null;
+    this._userTouched = false;
 
     if (containerEl) {
       containerEl.insertBefore(this.backdrop, containerEl.firstChild);
@@ -52,6 +53,7 @@ export class FaceBackground {
   async hydrateFromDisk() {
     try {
       const disk = await fetchData('background');
+      if (this._userTouched) return;
       if (disk && typeof disk === 'object') {
         this.config = {
           mode: disk.mode || 'camera',
@@ -88,6 +90,7 @@ export class FaceBackground {
   }
 
   setConfig(partial) {
+    this._userTouched = true;
     this.config = { ...this.config, ...partial };
     this.save();
     this.apply();
@@ -175,15 +178,23 @@ export class FaceBackground {
     }
 
     if (video) {
-      video.style.visibility = 'visible';
-      video.style.opacity = '1';
-      video.style.pointerEvents = '';
-      video.style.zIndex = '1';
-      if (mode === 'blur') {
+      video.style.pointerEvents = 'none';
+      // Keep the element in the layout so MindAR can keep reading frames.
+      if (mode === 'color' || mode === 'image') {
+        video.style.visibility = 'hidden';
+        video.style.opacity = '0';
+        video.style.filter = 'none';
+        video.style.transform = 'scaleX(-1)';
+      } else if (mode === 'blur') {
+        video.style.visibility = 'visible';
+        video.style.opacity = '1';
         const px = Math.max(0, Math.min(40, Number(blurPx) || 12));
         video.style.filter = `blur(${px}px)`;
         video.style.transform = 'scaleX(-1) scale(1.08)';
       } else {
+        // Live camera
+        video.style.visibility = 'visible';
+        video.style.opacity = '1';
         video.style.filter = 'none';
         video.style.transform = 'scaleX(-1)';
       }

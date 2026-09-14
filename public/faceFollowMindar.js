@@ -1095,6 +1095,11 @@ function updateRecordUi() {
 
 function onLoop() {
   keepModelVisible();
+  // MindAR may re-style the camera video; keep solid/image backgrounds covered.
+  const bgMode = background?.config?.mode;
+  if (bgMode === 'color' || bgMode === 'image') {
+    background.apply();
+  }
 
   const estimate = mindarThree?.getLatestEstimate?.();
   if (avatar) {
