@@ -23,13 +23,23 @@ export class FaceBackground {
     this.config = this.load();
     this.imageUrl = null;
     this._userTouched = false;
+    /** Optional: () => void — called after config changes so host can sync Three.js scene.background */
+    this.onChange = null;
 
-    if (containerEl) {
-      containerEl.insertBefore(this.backdrop, containerEl.firstChild);
-      containerEl.insertBefore(this.bgImage, this.backdrop.nextSibling);
-    }
+    this.ensureMounted();
     this.apply();
     this.hydrateFromDisk();
+  }
+
+  /** Keep backdrop nodes as first children of #container (MindAR may wipe/rebuild DOM). */
+  ensureMounted() {
+    if (!this.container) return;
+    if (this.backdrop.parentNode !== this.container) {
+      this.container.insertBefore(this.backdrop, this.container.firstChild);
+    }
+    if (this.bgImage.parentNode !== this.container) {
+      this.container.insertBefore(this.bgImage, this.backdrop.nextSibling);
+    }
   }
 
   load() {
@@ -54,7 +64,7 @@ export class FaceBackground {
     try {
       const disk = await fetchData('background');
       if (this._userTouched) return;
-      if (disk && typeof disk === 'object') {
+      if (disk && typeof disk === 'object' && Object.keys(disk).length > 0) {
         this.config = {
           mode: disk.mode || 'camera',
           blurPx: disk.blurPx ?? 12,
@@ -74,6 +84,7 @@ export class FaceBackground {
           this.bgImage.src = this.imageUrl;
         }
         this.apply();
+        this.notify();
       }
     } catch (err) {
       console.warn('[FaceBackground] disk hydrate failed:', err);
@@ -89,11 +100,20 @@ export class FaceBackground {
     persistData('background', this.config);
   }
 
+  notify() {
+    try {
+      this.onChange?.(this.config);
+    } catch (e) {
+      console.warn('[FaceBackground] onChange failed:', e);
+    }
+  }
+
   setConfig(partial) {
     this._userTouched = true;
     this.config = { ...this.config, ...partial };
     this.save();
     this.apply();
+    this.notify();
   }
 
   async setImageFile(file) {
@@ -122,7 +142,6 @@ export class FaceBackground {
       this.bgImage.src = this.imageUrl;
       this.setConfig({ mode: 'image', imageFile: uploaded.file });
     } catch (err) {
-      // Fallback: blob URL for preview if API unavailable
       console.warn('[FaceBackground] upload failed, using blob URL:', err);
       this.imageUrl = URL.createObjectURL(file);
       this.bgImage.src = this.imageUrl;
@@ -156,19 +175,27 @@ export class FaceBackground {
   }
 
   refresh() {
+    this.ensureMounted();
     this.apply();
+    this.notify();
   }
 
   apply() {
     if (!this.container) return;
-    const video = this.container.querySelector('video');
+    this.ensureMounted();
+
     const { mode, blurPx, color } = this.config;
+    const hideCamera = mode === 'color' || mode === 'image';
+    this.container.classList.toggle('bg-hide-camera', hideCamera);
 
     this.backdrop.style.backgroundImage = 'none';
     this.backdrop.style.backgroundColor = 'transparent';
+    this.container.style.backgroundColor = 'transparent';
 
     if (mode === 'color') {
-      this.backdrop.style.backgroundColor = color || '#0a0e14';
+      const c = color || '#0a0e14';
+      this.backdrop.style.backgroundColor = c;
+      this.container.style.backgroundColor = c;
       this.bgImage.style.display = 'none';
     } else if (mode === 'image' && this.imageUrl) {
       this.bgImage.style.display = 'block';
@@ -177,10 +204,10 @@ export class FaceBackground {
       this.bgImage.style.display = 'none';
     }
 
-    if (video) {
+    // Style every camera video MindAR may inject
+    this.container.querySelectorAll('video').forEach((video) => {
       video.style.pointerEvents = 'none';
-      // Keep the element in the layout so MindAR can keep reading frames.
-      if (mode === 'color' || mode === 'image') {
+      if (hideCamera) {
         video.style.visibility = 'hidden';
         video.style.opacity = '0';
         video.style.filter = 'none';
@@ -192,13 +219,12 @@ export class FaceBackground {
         video.style.filter = `blur(${px}px)`;
         video.style.transform = 'scaleX(-1) scale(1.08)';
       } else {
-        // Live camera
         video.style.visibility = 'visible';
         video.style.opacity = '1';
         video.style.filter = 'none';
         video.style.transform = 'scaleX(-1)';
       }
-    }
+    });
   }
 
   draw(ctx, w, h) {

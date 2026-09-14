@@ -942,7 +942,39 @@ function ensureTransparentCanvas() {
   renderer.toneMapping = THREE.NoToneMapping;
   if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1;
   renderer.domElement.style.background = 'transparent';
-  if (scene) scene.background = null;
+  // Do not clear scene.background here — syncThreeBackground owns it.
+}
+
+/**
+ * Solid color must live on the Three.js scene: MindAR's WebGL canvas is often
+ * opaque, so a CSS color behind it never shows. Image/camera use CSS layers.
+ */
+function syncThreeBackground() {
+  if (!scene || !renderer) return;
+  const mode = background?.config?.mode || 'camera';
+  const color = background?.config?.color || '#0a0e14';
+
+  if (mode === 'color') {
+    try {
+      scene.background = new THREE.Color(color);
+    } catch {
+      scene.background = new THREE.Color(0x0a0e14);
+    }
+    renderer.setClearColor(new THREE.Color(color), 1);
+  } else {
+    scene.background = null;
+    renderer.setClearColor(0x000000, 0);
+  }
+  background?.ensureMounted?.();
+  background?.apply?.();
+}
+
+function wireBackgroundCallbacks() {
+  if (!background) return;
+  background.onChange = () => {
+    syncThreeBackground();
+  };
+  syncThreeBackground();
 }
 
 /** Paint composite after WebGL render so mesh + model appear in the recording. */
@@ -1095,11 +1127,6 @@ function updateRecordUi() {
 
 function onLoop() {
   keepModelVisible();
-  // MindAR may re-style the camera video; keep solid/image backgrounds covered.
-  const bgMode = background?.config?.mode;
-  if (bgMode === 'color' || bgMode === 'image') {
-    background.apply();
-  }
 
   const estimate = mindarThree?.getLatestEstimate?.();
   if (avatar) {
@@ -1137,7 +1164,11 @@ async function setup() {
   addSceneLights();
 
   if (!background) background = new FaceBackground(container);
-  else background.apply();
+  else {
+    background.ensureMounted();
+    background.apply();
+  }
+  wireBackgroundCallbacks();
 
   if (!faceRecorder) faceRecorder = new FaceRecorder();
 
@@ -1156,7 +1187,9 @@ async function startTracking() {
   await mindarThree.start();
   syncVideoFeed();
   mindarThree.video?.play?.().catch(() => {});
+  background?.ensureMounted?.();
   background?.refresh();
+  syncThreeBackground();
 
   running = true;
   renderer.setAnimationLoop(onLoop);
@@ -1167,6 +1200,7 @@ async function startTracking() {
   setRecordPanelUnlocked(true);
   applyPlacement();
   background?.refresh();
+  syncThreeBackground();
   updateRecordUi();
   setStatus('<strong>Step 1 OK:</strong> Tracking + record ready', true);
   setHud('Load model (step 2) · sensitivity on Settings page');
@@ -1284,21 +1318,24 @@ async function initModelDropdown() {
 function bindExtendedUi() {
   if (!audioLip) audioLip = new AudioLipSync();
   if (!background && container) background = new FaceBackground(container);
+  wireBackgroundCallbacks();
   initModelDropdown().catch(console.error);
 
   $('bg-mode')?.addEventListener('change', () => {
     background?.setConfig({ mode: $('bg-mode').value });
     _bgImageEl = background?.getImageElement() ?? null;
     faceRecorder?.setBackdropImage(_bgImageEl);
-    background?.refresh();
+    syncThreeBackground();
   });
   $('bg-color')?.addEventListener('input', () => {
     background?.setConfig({ mode: 'color', color: $('bg-color').value });
     if ($('bg-mode')) $('bg-mode').value = 'color';
+    syncThreeBackground();
   });
   $('bg-blur')?.addEventListener('input', () => {
     background?.setConfig({ mode: 'blur', blurPx: Number($('bg-blur').value) });
     if ($('bg-mode')) $('bg-mode').value = 'blur';
+    syncThreeBackground();
   });
   $('bg-image-file')?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
@@ -1309,6 +1346,7 @@ function bindExtendedUi() {
       _bgImageEl = background.getImageElement();
       faceRecorder?.setBackdropImage(_bgImageEl);
       background.refresh();
+      syncThreeBackground();
     };
     if (background.bgImage.complete) syncBg();
     else background.bgImage.onload = syncBg;
@@ -1319,6 +1357,7 @@ function bindExtendedUi() {
     faceRecorder?.setBackdropImage(null);
     if ($('bg-mode')) $('bg-mode').value = 'camera';
     background?.refresh();
+    syncThreeBackground();
   });
 
   if ($('bg-mode') && background) $('bg-mode').value = background.config.mode;
