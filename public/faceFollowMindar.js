@@ -11,9 +11,11 @@ import {
   getFaceTrackingLerp,
   getFaceMotionLerp,
   getLipSyncLerp,
+  getLipSyncConfig,
   loadAppSettings,
   patchAppSettings,
   hydrateAppSettings,
+  invalidateAppSettingsCache,
 } from './faceFollowAppSettings.js';
 import { FaceBackground } from './faceFollowBackground.js';
 import { FaceRecorder } from './faceFollowRecorder.js';
@@ -545,7 +547,11 @@ class FaceAvatar {
   /** Fast mouth apply — vowel shapes drive lips; jaw only opens for open vowels. */
   _applyAudioMouthCached(mouth) {
     const lipLerp = this._lipSyncLerp();
-    const closeLerp = Math.min(0.55, lipLerp * 1.8); // close faster than open
+    const cfg = getLipSyncConfig();
+    const closeLerp = Math.min(0.65, lipLerp * cfg.closeBoost);
+    const mix = cfg.secondaryMix;
+    const jawAmt = cfg.jawOpen;
+
     const scaled = {};
     const jawOpen = clamp01(mouth.mouthOpen ?? 0);
     for (const key of MOUTH_EXPR_KEYS) {
@@ -561,11 +567,10 @@ class FaceAvatar {
       }
     }
 
-    // Jaw/open morph: mostly from aa + mouthOpen, not a constant open during all speech.
     const jawTarget = clamp01(
-      (dominant === 'aa' ? scaled.aa * 0.75 : scaled.aa * 0.2) +
-        (dominant === 'ee' || dominant === 'ih' ? jawOpen * 0.15 : 0) +
-        jawOpen * (dominant === 'aa' ? 0.35 : 0.12)
+      (dominant === 'aa' ? scaled.aa * 0.7 : scaled.aa * 0.15) * jawAmt +
+        (dominant === 'ee' || dominant === 'ih' ? jawOpen * 0.12 : 0) * jawAmt +
+        jawOpen * (dominant === 'aa' ? 0.3 : 0.08) * jawAmt
     );
 
     for (const { mesh, idx } of this._mouthOpenMorphEntries) {
@@ -577,7 +582,7 @@ class FaceAvatar {
 
     for (const { mesh, idx, preset } of this._mouthMorphEntries) {
       const base = scaled[preset] || 0;
-      const target = preset === dominant ? base : base * 0.18;
+      const target = preset === dominant ? base : base * mix;
       const cur = mesh.morphTargetInfluences[idx] || 0;
       const lerp = target < cur ? closeLerp : lipLerp;
       mesh.morphTargetInfluences[idx] = cur + (target - cur) * lerp;
@@ -589,7 +594,7 @@ class FaceAvatar {
       const vrmName = this.vrmPresetToVrm.get(key) || key;
       if (!this.vrmExprNames.has(vrmName)) continue;
       const base = scaled[key];
-      const target = key === dominant ? base : base * 0.18;
+      const target = key === dominant ? base : base * mix;
       const prev = em.getValue(vrmName) ?? 0;
       const lerp = target < prev ? closeLerp : lipLerp;
       em.setValue(vrmName, prev + (target - prev) * lerp);
@@ -1405,6 +1410,7 @@ function syncSensitivityInputsFromSettings() {
   const s = loadAppSettings();
   const sens = s.sensitivity || {};
   const smooth = s.smoothing || {};
+  const lip = s.lipSync || {};
   const setVal = (id, v) => {
     const el = $(id);
     if (el && Number.isFinite(Number(v))) el.value = String(v);
@@ -1416,30 +1422,54 @@ function syncSensitivityInputsFromSettings() {
   setVal('smooth-face', smooth.face ?? 0.18);
   setVal('smooth-motion', smooth.faceMotion ?? 0.2);
   setVal('smooth-lips', smooth.lipSync ?? 0.2);
+  setVal('lip-jaw', lip.jawOpen ?? 0.35);
+  setVal('lip-vowel', lip.vowelOpen ?? 0.48);
+  setVal('lip-silence', lip.silenceGate ?? 0.016);
+  setVal('lip-cons', lip.consonantClose ?? 0.82);
+  setVal('lip-close', lip.closeBoost ?? 2.1);
+  setVal('lip-blend', lip.secondaryMix ?? 0.14);
 }
+
+let _applyingSensitivity = false;
 
 function applySensitivityFromInputs() {
   const num = (id, fallback) => {
     const v = Number($(id)?.value);
     return Number.isFinite(v) ? v : fallback;
   };
-  patchAppSettings({
-    sensitivity: {
-      eyes: num('sens-eyes', 1),
-      mouth: num('sens-mouth', 1),
-      expressions: num('sens-expr', 1),
-      audioLipSync: num('sens-lips', 1.8),
-    },
-    smoothing: {
-      face: num('smooth-face', 0.18),
-      faceMotion: num('smooth-motion', 0.2),
-      lipSync: num('smooth-lips', 0.2),
-    },
-  });
-  invalidateExpressionOptionsCache();
-  const app = getAppExpressionSensitivities();
-  if (audioLip) audioLip.setIntensity(app.audioLipSyncMultiplier);
-  if (avatar) avatar.setExpressionOptions(getExpressionOptions());
+  _applyingSensitivity = true;
+  try {
+    patchAppSettings({
+      sensitivity: {
+        eyes: num('sens-eyes', 1),
+        mouth: num('sens-mouth', 1),
+        expressions: num('sens-expr', 1),
+        audioLipSync: num('sens-lips', 1.8),
+      },
+      smoothing: {
+        face: num('smooth-face', 0.18),
+        faceMotion: num('smooth-motion', 0.2),
+        lipSync: num('smooth-lips', 0.2),
+      },
+      lipSync: {
+        jawOpen: num('lip-jaw', 0.35),
+        vowelOpen: num('lip-vowel', 0.48),
+        silenceGate: num('lip-silence', 0.016),
+        consonantClose: num('lip-cons', 0.82),
+        closeBoost: num('lip-close', 2.1),
+        secondaryMix: num('lip-blend', 0.14),
+      },
+    });
+    invalidateExpressionOptionsCache();
+    const app = getAppExpressionSensitivities();
+    if (audioLip) {
+      audioLip.setIntensity(app.audioLipSyncMultiplier);
+      audioLip.rebuildPhonemeTimeline();
+    }
+    if (avatar) avatar.setExpressionOptions(getExpressionOptions());
+  } finally {
+    _applyingSensitivity = false;
+  }
 }
 
 function bindSensitivityPanel() {
@@ -1454,6 +1484,12 @@ function bindSensitivityPanel() {
     'smooth-face',
     'smooth-motion',
     'smooth-lips',
+    'lip-jaw',
+    'lip-vowel',
+    'lip-silence',
+    'lip-cons',
+    'lip-close',
+    'lip-blend',
   ];
   for (const id of ids) {
     const el = $(id);
@@ -1462,15 +1498,24 @@ function bindSensitivityPanel() {
     el.addEventListener('change', applySensitivityFromInputs);
   }
 
+  const onSettingsExternal = () => {
+    if (_applyingSensitivity) return;
+    invalidateAppSettingsCache();
+    invalidateExpressionOptionsCache();
+    syncSensitivityInputsFromSettings();
+    const app = getAppExpressionSensitivities();
+    if (audioLip) {
+      audioLip.setIntensity(app.audioLipSyncMultiplier);
+      audioLip.rebuildPhonemeTimeline();
+    }
+    if (avatar) avatar.setExpressionOptions(getExpressionOptions());
+  };
+
   window.addEventListener('storage', (e) => {
     if (e.key !== 'edge_ai_settings_v1') return;
-    invalidateExpressionOptionsCache();
-    syncSensitivityInputsFromSettings();
+    onSettingsExternal();
   });
-  window.addEventListener('edge-ai-settings', () => {
-    invalidateExpressionOptionsCache();
-    syncSensitivityInputsFromSettings();
-  });
+  window.addEventListener('edge-ai-settings', onSettingsExternal);
 }
 
 function bindExtendedUi() {

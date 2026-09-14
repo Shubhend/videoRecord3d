@@ -97,6 +97,21 @@ export const DEFAULT_SETTINGS = Object.freeze({
     silenceGapSec: 0.5,
     speechThreshold: 0.028,
   },
+  /** Audio lip-sync naturalness (face-follow). */
+  lipSync: {
+    /** Jaw open on open vowels (0 = barely open, 1 = wide). */
+    jawOpen: 0.35,
+    /** Higher = treat more audio as silence → mouth closes more. */
+    silenceGate: 0.016,
+    /** Overall mouth openness during vowels. */
+    vowelOpen: 0.48,
+    /** How strongly consonants/sibilants close the mouth (0–1). */
+    consonantClose: 0.82,
+    /** Closing speed vs opening (1 = same, 2 = closes twice as fast). */
+    closeBoost: 2.1,
+    /** Non-dominant viseme bleed (lower = clearer shapes, less always-open). */
+    secondaryMix: 0.14,
+  },
 });
 
 const listeners = new Set();
@@ -225,6 +240,11 @@ export function setSettings(partial) {
       console.error(e);
     }
   });
+  try {
+    window.dispatchEvent(new CustomEvent('edge-ai-settings', { detail: next }));
+  } catch {
+    /* ignore */
+  }
   return next;
 }
 
@@ -245,6 +265,11 @@ export function resetSettings() {
       console.error(e);
     }
   });
+  try {
+    window.dispatchEvent(new CustomEvent('edge-ai-settings', { detail: _cached }));
+  } catch {
+    /* ignore */
+  }
   return _cached;
 }
 

@@ -90,6 +90,57 @@ const ROWS = {
       step: 0.01,
     },
   ],
+  /** Naturalness knobs for audio lip-sync (settings.lipSync). */
+  lipSyncNatural: [
+    {
+      key: 'jawOpen',
+      label: 'Jaw open amount',
+      hint: 'How wide the jaw opens on open vowels (あ/A). Lower if the mouth looks always open while talking.',
+      min: 0,
+      max: 1,
+      step: 0.05,
+    },
+    {
+      key: 'vowelOpen',
+      label: 'Vowel openness',
+      hint: 'Overall mouth opening on vowels. Lower = subtler lip motion during speech.',
+      min: 0.15,
+      max: 1,
+      step: 0.05,
+    },
+    {
+      key: 'silenceGate',
+      label: 'Silence / close threshold',
+      hint: 'Higher = mouth closes more on quiet gaps and soft consonants.',
+      min: 0.006,
+      max: 0.04,
+      step: 0.001,
+    },
+    {
+      key: 'consonantClose',
+      label: 'Consonant close',
+      hint: 'How much sibilants/consonants pull the lips closed (0 = ignore, 1 = strong close).',
+      min: 0,
+      max: 1,
+      step: 0.05,
+    },
+    {
+      key: 'closeBoost',
+      label: 'Close speed',
+      hint: 'How fast the mouth closes vs opens. Higher = snappier closes between syllables (more natural chatter).',
+      min: 1,
+      max: 3.5,
+      step: 0.1,
+    },
+    {
+      key: 'secondaryMix',
+      label: 'Shape blend',
+      hint: 'How much non-dominant mouth shapes stay visible. Lower = clearer single shapes, less “always open” look.',
+      min: 0.05,
+      max: 0.45,
+      step: 0.01,
+    },
+  ],
   camera: [
     {
       key: 'smoothness',
@@ -316,6 +367,52 @@ function renderFaceSmoothPanel() {
   });
 }
 
+function buildLipSyncNaturalRow(def, settings) {
+  const cfg = settings.lipSync || {};
+  const val = Number(cfg[def.key] ?? def.min ?? 0);
+  const min = Number(def.min ?? 0);
+  const max = Number(def.max ?? 1);
+  const step = def.step ?? 0.05;
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <div class="row-label">
+      <div>
+        <span class="label-text">${def.label}</span>
+        <span class="label-hint">${def.hint}</span>
+      </div>
+    </div>
+    <input
+      type="number" min="${min}" max="${max}" step="${step}"
+      class="num-input"
+      data-lipsync-num="${def.key}"
+      value="${val}"
+    />
+  `;
+  return row;
+}
+
+function renderLipSyncNaturalPanel() {
+  const settings = getSettings();
+  const container = document.getElementById('rows-lipsync-natural');
+  if (!container) return;
+  container.innerHTML = '';
+  ROWS.lipSyncNatural.forEach((def) => container.appendChild(buildLipSyncNaturalRow(def, settings)));
+
+  container.querySelectorAll('input[data-lipsync-num]').forEach((input) => {
+    const key = input.dataset.lipsyncNum;
+    const save = () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      setSettings({ lipSync: { [key]: v } });
+      showToast(`${labelFor(key)}: ${v}`);
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
+  });
+}
+
 function render() {
   const settings = getSettings();
   renderInto('rows-face', ROWS.face, settings);
@@ -324,6 +421,7 @@ function render() {
   renderInto('rows-presence', ROWS.presence, settings);
   renderInto('rows-smoothing', ROWS.smoothing, settings);
   renderFaceSmoothPanel();
+  renderLipSyncNaturalPanel();
   renderCameraPanel();
   bindRowEvents();
 }

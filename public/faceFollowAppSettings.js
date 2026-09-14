@@ -25,6 +25,14 @@ const DEFAULTS = {
     faceMotion: 0.2,
     lipSync: 0.2,
   },
+  lipSync: {
+    jawOpen: 0.35,
+    silenceGate: 0.016,
+    vowelOpen: 0.48,
+    consonantClose: 0.82,
+    closeBoost: 2.1,
+    secondaryMix: 0.14,
+  },
 };
 
 function deepMerge(target, source) {
@@ -105,9 +113,19 @@ export function patchAppSettings(partial) {
   try {
     window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
   } catch {
+    /* ignore */
+  }
+  try {
     window.dispatchEvent(new CustomEvent('edge-ai-settings', { detail: next }));
+  } catch {
+    /* ignore */
   }
   return next;
+}
+
+/** Drop in-memory cache so the next load reads localStorage (e.g. other tab). */
+export function invalidateAppSettingsCache() {
+  _cached = null;
 }
 
 /** Face / mouth / audio lip-sync multipliers from Settings → Face sensitivity. */
@@ -174,4 +192,32 @@ export function getFaceMotionLerp() {
 /** Audio lip-sync mouth lerp — lower = smoother lips. */
 export function getLipSyncLerp() {
   return clampLerp(loadAppSettings().smoothing?.lipSync, 0.08, 0.5, 0.2);
+}
+
+const LIP_SYNC_DEFAULTS = {
+  jawOpen: 0.35,
+  silenceGate: 0.016,
+  vowelOpen: 0.48,
+  consonantClose: 0.82,
+  closeBoost: 2.1,
+  secondaryMix: 0.14,
+};
+
+/** Naturalness config for phoneme analysis + mouth apply. */
+export function getLipSyncConfig() {
+  const raw = loadAppSettings().lipSync || {};
+  const n = (key, lo, hi) => {
+    const v = Number(raw[key]);
+    const fb = LIP_SYNC_DEFAULTS[key];
+    if (!Number.isFinite(v)) return fb;
+    return Math.max(lo, Math.min(hi, v));
+  };
+  return {
+    jawOpen: n('jawOpen', 0, 1),
+    silenceGate: n('silenceGate', 0.004, 0.05),
+    vowelOpen: n('vowelOpen', 0.1, 1),
+    consonantClose: n('consonantClose', 0, 1),
+    closeBoost: n('closeBoost', 1, 3.5),
+    secondaryMix: n('secondaryMix', 0.05, 0.5),
+  };
 }

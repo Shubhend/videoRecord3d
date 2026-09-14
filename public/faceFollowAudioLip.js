@@ -3,7 +3,7 @@
  */
 import { AudioLipsync } from './js/audioLipsync.js';
 import { buildPhonemeTimeline, sampleTimeline } from './faceFollowPhonemeViseme.js';
-import { getLipSyncLerp } from './faceFollowAppSettings.js';
+import { getLipSyncLerp, getLipSyncConfig } from './faceFollowAppSettings.js';
 
 const ZERO = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
 
@@ -27,13 +27,18 @@ export class AudioLipSync {
     if (Math.abs(next - this._intensity) < 0.001) return;
     this._intensity = next;
     this._engine?.setIntensity(this._intensity);
-    if (this._engine?.audioBuffer) {
-      this._phonemeTimeline = buildPhonemeTimeline(
-        this._engine.audioBuffer,
-        this._intensity
-      );
-      this._seekTimelineIndex(this._engine.getCurrentTime());
-    }
+    this.rebuildPhonemeTimeline();
+  }
+
+  /** Re-bake phoneme timeline from current buffer + lip-sync settings. */
+  rebuildPhonemeTimeline() {
+    if (!this._engine?.audioBuffer) return false;
+    this._phonemeTimeline = buildPhonemeTimeline(
+      this._engine.audioBuffer,
+      this._intensity
+    );
+    this._seekTimelineIndex(this._engine.getCurrentTime());
+    return true;
   }
 
   async loadFile(file) {
@@ -175,11 +180,13 @@ export class AudioLipSync {
     }
 
     // EMA — close faster than open so lips don't stay gaping between syllables.
+    const cfg = getLipSyncConfig();
     const baseLerp = Math.max(0.08, Math.min(0.5, getLipSyncLerp() * 1.15));
     const s = this._smoothMouth;
     for (const k of Object.keys(ZERO)) {
       const target = mouth[k] || 0;
-      const lerp = target < s[k] ? Math.min(0.55, baseLerp * 1.85) : baseLerp;
+      const lerp =
+        target < s[k] ? Math.min(0.65, baseLerp * cfg.closeBoost) : baseLerp;
       s[k] = s[k] + (target - s[k]) * lerp;
       if (s[k] < 0.012) s[k] = 0;
     }
