@@ -174,12 +174,14 @@ export class AudioLipSync {
       };
     }
 
-    // EMA so phoneme timeline hops don't look like random mouth snaps.
-    const mouthLerp = Math.max(0.08, Math.min(0.5, getLipSyncLerp() * 1.15));
+    // EMA — close faster than open so lips don't stay gaping between syllables.
+    const baseLerp = Math.max(0.08, Math.min(0.5, getLipSyncLerp() * 1.15));
     const s = this._smoothMouth;
     for (const k of Object.keys(ZERO)) {
       const target = mouth[k] || 0;
-      s[k] = s[k] + (target - s[k]) * mouthLerp;
+      const lerp = target < s[k] ? Math.min(0.55, baseLerp * 1.85) : baseLerp;
+      s[k] = s[k] + (target - s[k]) * lerp;
+      if (s[k] < 0.012) s[k] = 0;
     }
     return { ...s };
   }

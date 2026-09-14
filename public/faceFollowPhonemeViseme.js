@@ -1,6 +1,6 @@
 /**
  * Phoneme-style VRM visemes (aa/ih/ou/ee/oh) from spectral analysis of speech audio.
- * Pre-analyzes the full clip, then drives mouth by playback time + live refinement.
+ * Designed for natural open/close — mouth should not stay wide open for all speech.
  */
 
 function clamp01(v) {
@@ -56,41 +56,46 @@ function analyzeWindow(samples, start, winSize) {
 }
 
 /**
- * Map spectral features → Japanese/VRM vowel visemes (phonetic-inspired).
- * aa≈あ, ih≈い, ee≈え, oh/ou≈お/う
+ * Map spectral features → VRM vowel visemes.
+ * Quiet / noisy / fricative frames stay mostly closed.
  */
 export function featuresToVisemes(f, intensity = 1) {
   const out = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
-  const gate = 0.006;
+  // Higher gate → silence and soft consonants close the mouth.
+  const gate = 0.014;
   if (f.rms < gate) return out;
 
   const total = f.low + f.mid + f.high + 1e-6;
   const l = f.low / total;
   const m = f.mid / total;
   const h = f.high / total;
-  const open = clamp01(Math.pow(f.rms * 14 * intensity, 0.55));
   const cent = f.centroid;
   const spread = f.zcr;
 
+  // Energy above silence, compressed so talking doesn't peg mouth open.
+  const energy = Math.max(0, f.rms - gate);
+  const open = clamp01(Math.pow(energy * 12 * intensity, 0.72));
+
+  // High zero-crossing with modest energy ≈ consonants / sibilants → keep lips tighter.
+  const consonant = clamp01(spread * 2.2) * clamp01(1.15 - open);
+  const vowelAmt = clamp01(open * (1 - consonant * 0.75));
+
   const scores = {
-    aa: m * 2.8 + open * 1.35 + (cent > 850 && cent < 2100 ? 0.45 : 0),
-    ih: h * 2.8 + (cent > 1700 ? 0.55 : 0) + spread * 0.45,
-    ee: h * 1.7 + m * 1.35 + (cent > 1300 && cent < 2900 ? 0.45 : 0),
-    ou: l * 1.35 + (cent < 1150 ? 0.4 : 0) + (1 - h) * 0.3,
-    oh: l * 0.95 + (cent < 850 ? 0.35 : 0),
+    aa: m * 2.4 + (cent > 850 && cent < 2100 ? 0.35 : 0) + open * 0.25,
+    ih: h * 2.6 + (cent > 1700 ? 0.45 : 0) + spread * 0.25,
+    ee: h * 1.6 + m * 1.2 + (cent > 1300 && cent < 2900 ? 0.35 : 0),
+    ou: l * 1.5 + (cent < 1150 ? 0.35 : 0) + (1 - h) * 0.25,
+    oh: l * 1.1 + (cent < 850 ? 0.4 : 0),
   };
 
-  let maxS = 0;
   let sumS = 0;
   for (const k of Object.keys(scores)) {
     scores[k] = Math.max(0, scores[k]);
-    maxS = Math.max(maxS, scores[k]);
     sumS += scores[k];
   }
-
   if (sumS < 0.02) return out;
 
-  const temp = 2.2;
+  const temp = 2.4;
   for (const k of Object.keys(scores)) {
     scores[k] = Math.exp(Math.log(scores[k] + 1e-6) * temp);
   }
@@ -98,22 +103,26 @@ export function featuresToVisemes(f, intensity = 1) {
   for (const k of Object.keys(scores)) norm += scores[k];
   norm = Math.max(norm, 1e-6);
 
-  out.mouthOpen = open;
+  // mouthOpen tracks vowel energy only — not full RMS — so speech isn't always open.
+  out.mouthOpen = vowelAmt * 0.55;
   for (const k of Object.keys(scores)) {
-    out[k] = clamp01((scores[k] / norm) * open * 1.15);
+    out[k] = clamp01((scores[k] / norm) * vowelAmt * 0.95);
   }
 
   return out;
 }
 
-/** Competitive viseme mix — softer than hard one-hot so lips stay natural. */
+/**
+ * Competitive viseme mix without forcing aa/jaw open from loudness.
+ */
 export function sharpenVisemes(mouth) {
   const keys = ['aa', 'ih', 'ou', 'ee', 'oh'];
   const open = mouth.mouthOpen ?? Math.max(...keys.map((k) => mouth[k] || 0));
-  if (open < 0.03) {
+  if (open < 0.025) {
     return { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
   }
-  const bias = { aa: 1.1, ih: 1.08, ee: 1.05, ou: 1.02, oh: 0.7 };
+
+  const bias = { aa: 1.05, ih: 1.1, ee: 1.06, ou: 1.02, oh: 0.95 };
   let best = keys[0];
   let bestV = -1;
   for (const k of keys) {
@@ -123,17 +132,25 @@ export function sharpenVisemes(mouth) {
       best = k;
     }
   }
-  const out = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: open };
+
+  const out = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 };
   for (const k of keys) {
     const v = mouth[k] || 0;
-    out[k] = clamp01(v * (k === best ? 1.05 : 0.42));
+    // Stronger winner, quieter runners-up → clearer shapes, less always-open blend.
+    out[k] = clamp01(v * (k === best ? 1.08 : 0.22));
   }
-  out.aa = clamp01(Math.max(out.aa, open * 0.55));
+
+  // Jaw/mouthOpen depends on which vowel wins — closed vowels stay tighter.
   if (best === 'aa') {
-    out.aa = clamp01(Math.max(out.aa, open * 0.75));
-  } else if (best !== 'oh' && best !== 'ou') {
-    out[best] = clamp01(Math.max(out[best], open * 0.4));
+    out.mouthOpen = clamp01(Math.max(open * 0.65, out.aa * 0.7));
+    out.aa = clamp01(Math.max(out.aa, open * 0.35));
+  } else if (best === 'ee' || best === 'ih') {
+    out.mouthOpen = clamp01(open * 0.28);
+  } else {
+    // ou / oh — rounded, not wide open
+    out.mouthOpen = clamp01(open * 0.22);
   }
+
   return out;
 }
 
@@ -154,8 +171,9 @@ export function lerpVisemes(a, b, t) {
 export function buildPhonemeTimeline(audioBuffer, intensity = 1) {
   const data = audioBuffer.getChannelData(0);
   const sr = audioBuffer.sampleRate;
-  const hopSec = 0.03;
-  const winSec = 0.05;
+  // Slightly finer hops catch open/close of syllables better.
+  const hopSec = 0.025;
+  const winSec = 0.045;
   const hop = Math.max(256, Math.floor(sr * hopSec));
   const win = Math.max(512, Math.floor(sr * winSec));
   const timeline = [];
@@ -171,16 +189,20 @@ export function buildPhonemeTimeline(audioBuffer, intensity = 1) {
     timeline.push({ t: endT, aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, mouthOpen: 0 });
   }
 
-  // Two-pass temporal blur so baked visemes don't flicker between hops.
-  const keys = ['aa', 'ih', 'ou', 'ee', 'oh', 'mouthOpen'];
-  for (let pass = 0; pass < 2; pass++) {
-    const copy = timeline.map((row) => ({ ...row }));
-    for (let i = 1; i < timeline.length - 1; i++) {
-      for (const k of keys) {
-        timeline[i][k] =
-          copy[i - 1][k] * 0.25 + copy[i][k] * 0.5 + copy[i + 1][k] * 0.25;
-      }
+  // Light temporal blur — keep mouthOpen from smearing open across consonants.
+  const shapeKeys = ['aa', 'ih', 'ou', 'ee', 'oh'];
+  const copy = timeline.map((row) => ({ ...row }));
+  for (let i = 1; i < timeline.length - 1; i++) {
+    for (const k of shapeKeys) {
+      timeline[i][k] =
+        copy[i - 1][k] * 0.2 + copy[i][k] * 0.6 + copy[i + 1][k] * 0.2;
     }
+    // Prefer closing: if neighbors are quieter, pull mouthOpen down more.
+    const mo =
+      copy[i - 1].mouthOpen * 0.15 +
+      copy[i].mouthOpen * 0.55 +
+      copy[i + 1].mouthOpen * 0.15;
+    timeline[i].mouthOpen = Math.min(copy[i].mouthOpen, mo);
   }
 
   return timeline;

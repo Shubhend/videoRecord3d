@@ -542,21 +542,14 @@ class FaceAvatar {
     return null;
   }
 
-  /** Fast mouth apply — cached morphs + soft dominant mix (less random snapping). */
+  /** Fast mouth apply — vowel shapes drive lips; jaw only opens for open vowels. */
   _applyAudioMouthCached(mouth) {
     const lipLerp = this._lipSyncLerp();
+    const closeLerp = Math.min(0.55, lipLerp * 1.8); // close faster than open
     const scaled = {};
     const jawOpen = clamp01(mouth.mouthOpen ?? 0);
     for (const key of MOUTH_EXPR_KEYS) {
       scaled[key] = clamp01((mouth[key] || 0) * this.mouthIntensity);
-    }
-    scaled.aa = clamp01(Math.max(scaled.aa, jawOpen * 0.45));
-
-    for (const { mesh, idx } of this._mouthOpenMorphEntries) {
-      const target = clamp01(jawOpen * this.mouthIntensity * 0.8);
-      const cur = mesh.morphTargetInfluences[idx] || 0;
-      mesh.morphTargetInfluences[idx] =
-        cur + (target - cur) * lipLerp;
     }
 
     let dominant = MOUTH_EXPR_KEYS[0];
@@ -568,13 +561,26 @@ class FaceAvatar {
       }
     }
 
+    // Jaw/open morph: mostly from aa + mouthOpen, not a constant open during all speech.
+    const jawTarget = clamp01(
+      (dominant === 'aa' ? scaled.aa * 0.75 : scaled.aa * 0.2) +
+        (dominant === 'ee' || dominant === 'ih' ? jawOpen * 0.15 : 0) +
+        jawOpen * (dominant === 'aa' ? 0.35 : 0.12)
+    );
+
+    for (const { mesh, idx } of this._mouthOpenMorphEntries) {
+      const target = clamp01(jawTarget * this.mouthIntensity);
+      const cur = mesh.morphTargetInfluences[idx] || 0;
+      const lerp = target < cur ? closeLerp : lipLerp;
+      mesh.morphTargetInfluences[idx] = cur + (target - cur) * lerp;
+    }
+
     for (const { mesh, idx, preset } of this._mouthMorphEntries) {
       const base = scaled[preset] || 0;
-      // Soft mix: secondary shapes keep more weight so lips don't twitch between vowels.
-      const target = preset === dominant ? base : base * 0.35;
+      const target = preset === dominant ? base : base * 0.18;
       const cur = mesh.morphTargetInfluences[idx] || 0;
-      mesh.morphTargetInfluences[idx] =
-        cur + (target - cur) * lipLerp;
+      const lerp = target < cur ? closeLerp : lipLerp;
+      mesh.morphTargetInfluences[idx] = cur + (target - cur) * lerp;
     }
 
     const em = this.vrm?.expressionManager;
@@ -583,9 +589,10 @@ class FaceAvatar {
       const vrmName = this.vrmPresetToVrm.get(key) || key;
       if (!this.vrmExprNames.has(vrmName)) continue;
       const base = scaled[key];
-      const target = key === dominant ? base : base * 0.35;
+      const target = key === dominant ? base : base * 0.18;
       const prev = em.getValue(vrmName) ?? 0;
-      em.setValue(vrmName, prev + (target - prev) * lipLerp);
+      const lerp = target < prev ? closeLerp : lipLerp;
+      em.setValue(vrmName, prev + (target - prev) * lerp);
     }
   }
 
