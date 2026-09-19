@@ -964,13 +964,36 @@ function addSceneLights() {
 function applyAvatarLook() {
   const b = Math.max(0.4, Math.min(2.5, Number($('avatar-bright')?.value) || 1));
   const c = Math.max(0.5, Math.min(1.8, Number($('avatar-contrast')?.value) || 1));
+
   if (hemiLight) hemiLight.intensity = b;
   if (keyLight) keyLight.intensity = 0.85 * b;
-  if (!renderer) return;
-  // Keep exposure at 1 so brightness is only from lights (predictable).
-  if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1;
-  renderer.domElement.style.filter =
-    Math.abs(c - 1) < 0.001 ? '' : `contrast(${c})`;
+
+  // CSS filter always affects what you see (VRM/MToon often ignores scene lights).
+  const canvas = renderer?.domElement;
+  if (canvas) {
+    canvas.style.filter =
+      Math.abs(b - 1) < 0.001 && Math.abs(c - 1) < 0.001
+        ? 'none'
+        : `brightness(${b}) contrast(${c})`;
+  }
+
+  // Also tint mesh colors so recorded frames pick up brightness.
+  const root = avatar?.displayRoot ?? avatar?.vrm?.scene ?? avatar?.gltf?.scene;
+  if (!root) return;
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat?.color?.isColor) continue;
+      if (!mat.userData._lookColor) mat.userData._lookColor = mat.color.clone();
+      const base = mat.userData._lookColor;
+      mat.color.setRGB(
+        0.5 + (base.r * b - 0.5) * c,
+        0.5 + (base.g * b - 0.5) * c,
+        0.5 + (base.b * b - 0.5) * c
+      );
+    }
+  });
 }
 
 function addFaceMesh() {
@@ -1338,6 +1361,7 @@ async function loadModelFace() {
     modelPivot.add(sceneRoot);
     applyPlacement();
     applyBodyPartVisibility();
+    applyAvatarLook();
 
     modelLoaded = true;
     _anchorSmoothReady = false;
