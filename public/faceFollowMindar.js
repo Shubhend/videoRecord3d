@@ -948,8 +948,29 @@ function createFaceStyleTexture() {
 }
 
 /** Same as blender.html — avoids washing out original GLB/VRM colors. */
+let hemiLight = null;
+let keyLight = null;
+
 function addSceneLights() {
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+  hemiLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+  scene.add(hemiLight);
+  keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
+  keyLight.position.set(0.35, 1.2, 1.4);
+  scene.add(keyLight);
+  applyAvatarLook();
+}
+
+/** Brightness / contrast from face-follow panel (default 1 = normal). */
+function applyAvatarLook() {
+  const b = Math.max(0.4, Math.min(2.5, Number($('avatar-bright')?.value) || 1));
+  const c = Math.max(0.5, Math.min(1.8, Number($('avatar-contrast')?.value) || 1));
+  if (hemiLight) hemiLight.intensity = b;
+  if (keyLight) keyLight.intensity = 0.85 * b;
+  if (!renderer) return;
+  // Keep exposure at 1 so brightness is only from lights (predictable).
+  if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1;
+  renderer.domElement.style.filter =
+    Math.abs(c - 1) < 0.001 ? '' : `contrast(${c})`;
 }
 
 function addFaceMesh() {
@@ -1000,6 +1021,7 @@ function ensureTransparentCanvas() {
   if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1;
   renderer.domElement.style.background = 'transparent';
   // Clear color is owned by syncThreeBackground (transparent vs solid).
+  applyAvatarLook();
 }
 
 /**
@@ -1568,6 +1590,12 @@ function bindExtendedUi() {
   if ($('bg-blur') && background) $('bg-blur').value = background.config.blurPx;
 
   bindSensitivityPanel();
+
+  const applyLook = () => applyAvatarLook();
+  $('avatar-bright')?.addEventListener('input', applyLook);
+  $('avatar-bright')?.addEventListener('change', applyLook);
+  $('avatar-contrast')?.addEventListener('input', applyLook);
+  $('avatar-contrast')?.addEventListener('change', applyLook);
 
   $('audio-file')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
