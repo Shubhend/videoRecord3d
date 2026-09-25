@@ -18,7 +18,7 @@ import {
   invalidateAppSettingsCache,
 } from './faceFollowAppSettings.js';
 import { FaceBackground } from './faceFollowBackground.js';
-import { FaceRecorder, resolveRecordSize, RECORD_DEVICES } from './faceFollowRecorder.js';
+import { FaceRecorder, resolveRecordSize } from './faceFollowRecorder.js';
 import { AudioLipSync } from './faceFollowAudioLip.js';
 import {
   populateModelSelect,
@@ -1089,34 +1089,34 @@ function getSelectedRecordDevice() {
   return $('record-device')?.value || 'auto';
 }
 
-/** Show export crop guide only — never resize MindAR video/canvas (breaks UV mesh). */
+/** Letterbox the live container to the device aspect (keeps MindAR video/canvas CSS alone). */
 function applyDevicePreview() {
-  const guide = $('device-crop-guide');
-  const wrap = $('stage-wrap');
-  if (!guide || !wrap) return;
+  if (!container) return;
   const key = getSelectedRecordDevice();
-  const preset = RECORD_DEVICES[key];
-  if (!preset) {
-    guide.classList.remove('active');
-    guide.style.width = '';
-    guide.style.height = '';
-    return;
-  }
-  const aw = wrap.clientWidth || 1;
-  const ah = wrap.clientHeight || 1;
-  const ar = preset.w / preset.h;
-  let gw;
-  let gh;
-  if (aw / ah > ar) {
-    gh = ah;
-    gw = ah * ar;
+  if (!key || key === 'auto') {
+    container.classList.remove('device-preview');
+    container.removeAttribute('data-device');
   } else {
-    gw = aw;
-    gh = aw / ar;
+    container.classList.add('device-preview');
+    container.setAttribute('data-device', key);
   }
-  guide.style.width = `${Math.round(gw)}px`;
-  guide.style.height = `${Math.round(gh)}px`;
-  guide.classList.add('active');
+  // Let MindAR / Three pick up the new container size without forcing video CSS.
+  requestAnimationFrame(() => {
+    syncMindarToContainer();
+    window.dispatchEvent(new Event('resize'));
+  });
+}
+
+/** Match renderer (+ camera) to container after a device frame change. */
+function syncMindarToContainer() {
+  if (!container || !renderer) return;
+  const w = Math.max(2, container.clientWidth | 0);
+  const h = Math.max(2, container.clientHeight | 0);
+  renderer.setSize(w, h, false);
+  if (camera) {
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
 }
 
 function getRecordOutputSize() {
@@ -1377,6 +1377,7 @@ async function startTracking() {
   applyPlacement();
   background?.refresh();
   syncThreeBackground();
+  applyDevicePreview();
   updateRecordUi();
   setStatus('<strong>Step 1 OK:</strong> Tracking + record ready', true);
   setHud('Load model (step 2) · sensitivity on Settings page');
@@ -1624,7 +1625,9 @@ function bindExtendedUi() {
     updateRecordUi();
   });
   window.addEventListener('resize', () => {
-    if (getSelectedRecordDevice() !== 'auto') applyDevicePreview();
+    if (getSelectedRecordDevice() !== 'auto') {
+      requestAnimationFrame(() => syncMindarToContainer());
+    }
   });
 
   $('bg-mode')?.addEventListener('change', () => {
