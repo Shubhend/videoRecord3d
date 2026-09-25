@@ -1,5 +1,29 @@
 import { pickFaceRecordMime, ensureMp4Blob, downloadFaceVideo } from './faceFollowMp4Export.js';
 
+/** Export resolutions for device presets (used by record + download). */
+export const RECORD_DEVICES = {
+  auto: null,
+  phone: { w: 1080, h: 1920, label: 'phone' },
+  'phone-landscape': { w: 1920, h: 1080, label: 'phone-landscape' },
+  tablet: { w: 1200, h: 1600, label: 'tablet' },
+  'tablet-landscape': { w: 1600, h: 1200, label: 'tablet-landscape' },
+  desktop: { w: 1920, h: 1080, label: 'desktop' },
+  'desktop-2k': { w: 2560, h: 1440, label: 'desktop-2k' },
+  square: { w: 1080, h: 1080, label: 'square' },
+};
+
+export function resolveRecordSize(deviceKey, fallbackW, fallbackH) {
+  const preset = RECORD_DEVICES[deviceKey];
+  if (!preset) {
+    return {
+      w: Math.max(2, Math.floor(fallbackW) || 1280),
+      h: Math.max(2, Math.floor(fallbackH) || 720),
+      label: 'auto',
+    };
+  }
+  return { w: preset.w, h: preset.h, label: preset.label };
+}
+
 export class FaceRecorder {
   constructor() {
     this.composite = document.createElement('canvas');
@@ -37,14 +61,36 @@ export class FaceRecorder {
     ctx.clearRect(0, 0, w, h);
 
     const cfg = background?.config || { mode: 'camera' };
-    if (cfg.mode === 'color' || cfg.mode === 'image') {
+    const hideCamera = background?.shouldShowCamera?.() === false;
+    const screenPip = background?.isScreenPipMode?.() === true;
+    const screenSplit = background?.isScreenSplitMode?.() === true;
+    const customBg =
+      hideCamera ||
+      cfg.mode === 'color' ||
+      cfg.mode === 'image' ||
+      cfg.mode === 'screen';
+
+    if (customBg) {
       background?.draw(ctx, w, h);
     } else {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, w, h);
     }
 
-    if (video?.videoWidth > 0) {
+    if (screenSplit) {
+      // Bottom half already has black from draw(); paint camera + avatar there.
+      if (video?.videoWidth > 0) {
+        background.drawSplitCamera(ctx, video, w, h);
+      }
+      if (glCanvas?.width > 0) {
+        background.drawSplitGlCanvas(ctx, glCanvas, w, h);
+      }
+      return;
+    }
+
+    if (screenPip && video?.videoWidth > 0) {
+      background.drawCameraPip(ctx, video, w, h);
+    } else if (!hideCamera && video?.videoWidth > 0) {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       const scale = Math.max(w / vw, h / vh);
@@ -63,7 +109,10 @@ export class FaceRecorder {
       ctx.filter = 'none';
     }
 
-    if (glCanvas?.width > 0) {
+    /* Screen share PiP: avatar on top of camera PiP tile */
+    if (screenPip && glCanvas?.width > 0) {
+      background.drawGlCanvasPip(ctx, glCanvas, w, h);
+    } else if (!screenPip && glCanvas?.width > 0) {
       const cw = glCanvas.width;
       const ch = glCanvas.height;
       const scale = Math.max(w / cw, h / ch);
