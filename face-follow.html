@@ -20,11 +20,9 @@
       #stage-wrap {
         width: 100vw;
         height: calc(100vh - 52px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #0a0e14;
+        position: relative;
         overflow: hidden;
+        background: #0a0e14;
       }
       #container {
         width: 100%;
@@ -33,49 +31,21 @@
         overflow: hidden;
         background: transparent;
       }
-      /* Device export preview: letterbox live view to selected aspect */
-      #container.device-preview {
-        max-width: 100%;
-        max-height: 100%;
-        box-shadow: 0 0 0 1px #2a3544, 0 12px 40px rgba(0, 0, 0, 0.45);
+      /* Non-destructive export crop guide — never resize MindAR video/canvas */
+      #device-crop-guide {
+        display: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        box-sizing: border-box;
+        border: 1px solid rgba(59, 130, 246, 0.85);
+        box-shadow: 0 0 0 9999px rgba(10, 14, 20, 0.5);
+        pointer-events: none;
+        z-index: 5;
       }
-      #container.device-preview[data-device="phone"] {
-        aspect-ratio: 9 / 16;
-        width: min(100%, calc((100vh - 52px) * 9 / 16));
-        height: auto;
-      }
-      #container.device-preview[data-device="phone-landscape"] {
-        aspect-ratio: 16 / 9;
-        height: min(100%, calc(100vw * 9 / 16));
-        width: auto;
-      }
-      #container.device-preview[data-device="tablet"] {
-        aspect-ratio: 3 / 4;
-        width: min(100%, calc((100vh - 52px) * 3 / 4));
-        height: auto;
-      }
-      #container.device-preview[data-device="tablet-landscape"] {
-        aspect-ratio: 4 / 3;
-        height: min(100%, calc(100vw * 3 / 4));
-        width: auto;
-      }
-      #container.device-preview[data-device="desktop"],
-      #container.device-preview[data-device="desktop-2k"] {
-        aspect-ratio: 16 / 9;
-        height: min(100%, calc(100vw * 9 / 16));
-        width: auto;
-      }
-      #container.device-preview[data-device="square"] {
-        aspect-ratio: 1 / 1;
-        width: min(100%, calc(100vh - 52px));
-        height: auto;
-      }
-      #container.device-preview video,
-      #container.device-preview canvas {
-        position: absolute !important;
-        inset: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
+      #device-crop-guide.active {
+        display: block;
       }
       /* Stack: live camera (1) → color/image overlay (1, later in DOM) → 3D canvas (2) */
       #container video {
@@ -249,6 +219,7 @@
     </header>
     <div id="stage-wrap">
       <div id="container"></div>
+      <div id="device-crop-guide" aria-hidden="true"></div>
     </div>
     <video id="video-feed" playsinline muted autoplay></video>
  
@@ -289,7 +260,7 @@
           <option value="square">Square (1080×1080)</option>
         </select>
         <p style="margin:4px 0 6px;font-size:10px;color:#9aa8b8;">
-          Preview matches aspect; Stop &amp; save writes that resolution.
+          Blue frame = export crop. Live tracking stays full-screen so the face mesh stays aligned.
         </p>
         <label class="toggle">
           <input type="checkbox" id="record-with-audio" checked />

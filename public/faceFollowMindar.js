@@ -18,7 +18,7 @@ import {
   invalidateAppSettingsCache,
 } from './faceFollowAppSettings.js';
 import { FaceBackground } from './faceFollowBackground.js';
-import { FaceRecorder, resolveRecordSize } from './faceFollowRecorder.js';
+import { FaceRecorder, resolveRecordSize, RECORD_DEVICES } from './faceFollowRecorder.js';
 import { AudioLipSync } from './faceFollowAudioLip.js';
 import {
   populateModelSelect,
@@ -1089,16 +1089,34 @@ function getSelectedRecordDevice() {
   return $('record-device')?.value || 'auto';
 }
 
+/** Show export crop guide only — never resize MindAR video/canvas (breaks UV mesh). */
 function applyDevicePreview() {
-  if (!container) return;
+  const guide = $('device-crop-guide');
+  const wrap = $('stage-wrap');
+  if (!guide || !wrap) return;
   const key = getSelectedRecordDevice();
-  if (!key || key === 'auto') {
-    container.classList.remove('device-preview');
-    container.removeAttribute('data-device');
+  const preset = RECORD_DEVICES[key];
+  if (!preset) {
+    guide.classList.remove('active');
+    guide.style.width = '';
+    guide.style.height = '';
     return;
   }
-  container.classList.add('device-preview');
-  container.setAttribute('data-device', key);
+  const aw = wrap.clientWidth || 1;
+  const ah = wrap.clientHeight || 1;
+  const ar = preset.w / preset.h;
+  let gw;
+  let gh;
+  if (aw / ah > ar) {
+    gh = ah;
+    gw = ah * ar;
+  } else {
+    gw = aw;
+    gh = aw / ar;
+  }
+  guide.style.width = `${Math.round(gw)}px`;
+  guide.style.height = `${Math.round(gh)}px`;
+  guide.classList.add('active');
 }
 
 function getRecordOutputSize() {
@@ -1604,7 +1622,9 @@ function bindExtendedUi() {
   $('record-device')?.addEventListener('change', () => {
     applyDevicePreview();
     updateRecordUi();
-    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  });
+  window.addEventListener('resize', () => {
+    if (getSelectedRecordDevice() !== 'auto') applyDevicePreview();
   });
 
   $('bg-mode')?.addEventListener('change', () => {
