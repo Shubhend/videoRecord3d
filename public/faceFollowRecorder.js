@@ -1,5 +1,29 @@
 import { pickFaceRecordMime, ensureMp4Blob, downloadFaceVideo } from './faceFollowMp4Export.js';
 
+/** Export resolutions for device presets (used by record + download). */
+export const RECORD_DEVICES = {
+  auto: null,
+  phone: { w: 1080, h: 1920, label: 'phone' },
+  'phone-landscape': { w: 1920, h: 1080, label: 'phone-landscape' },
+  tablet: { w: 1200, h: 1600, label: 'tablet' },
+  'tablet-landscape': { w: 1600, h: 1200, label: 'tablet-landscape' },
+  desktop: { w: 1920, h: 1080, label: 'desktop' },
+  'desktop-2k': { w: 2560, h: 1440, label: 'desktop-2k' },
+  square: { w: 1080, h: 1080, label: 'square' },
+};
+
+export function resolveRecordSize(deviceKey, fallbackW, fallbackH) {
+  const preset = RECORD_DEVICES[deviceKey];
+  if (!preset) {
+    return {
+      w: Math.max(2, Math.floor(fallbackW) || 1280),
+      h: Math.max(2, Math.floor(fallbackH) || 720),
+      label: 'auto',
+    };
+  }
+  return { w: preset.w, h: preset.h, label: preset.label };
+}
+
 export class FaceRecorder {
   constructor() {
     this.composite = document.createElement('canvas');

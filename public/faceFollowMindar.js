@@ -18,7 +18,7 @@ import {
   invalidateAppSettingsCache,
 } from './faceFollowAppSettings.js';
 import { FaceBackground } from './faceFollowBackground.js';
-import { FaceRecorder } from './faceFollowRecorder.js';
+import { FaceRecorder, resolveRecordSize } from './faceFollowRecorder.js';
 import { AudioLipSync } from './faceFollowAudioLip.js';
 import {
   populateModelSelect,
@@ -1085,11 +1085,32 @@ function wireBackgroundCallbacks() {
   syncThreeBackground();
 }
 
+function getSelectedRecordDevice() {
+  return $('record-device')?.value || 'auto';
+}
+
+function applyDevicePreview() {
+  if (!container) return;
+  const key = getSelectedRecordDevice();
+  if (!key || key === 'auto') {
+    container.classList.remove('device-preview');
+    container.removeAttribute('data-device');
+    return;
+  }
+  container.classList.add('device-preview');
+  container.setAttribute('data-device', key);
+}
+
+function getRecordOutputSize() {
+  const fallbackW = container?.clientWidth || 1280;
+  const fallbackH = container?.clientHeight || 720;
+  return resolveRecordSize(getSelectedRecordDevice(), fallbackW, fallbackH);
+}
+
 /** Paint composite after WebGL render so mesh + model appear in the recording. */
 function paintRecordFrame() {
   if (!faceRecorder || !running || !mindarThree?.video || !renderer) return;
-  const w = container.clientWidth;
-  const h = container.clientHeight;
+  const { w, h } = getRecordOutputSize();
   faceRecorder.paintFrame(mindarThree.video, renderer.domElement, background, w, h);
 }
 
@@ -1234,7 +1255,13 @@ function getExpressionOptions() {
 function updateRecordUi() {
   const st = faceRecorder?.state || 'idle';
   const el = $('record-status');
-  if (el) el.textContent = `Record: ${st}`;
+  const { w, h, label } = getRecordOutputSize();
+  if (el) {
+    el.textContent =
+      st === 'idle'
+        ? `Record: idle · ${label} ${w}×${h} · exports .mp4`
+        : `Record: ${st} · ${label} ${w}×${h}`;
+  }
   const busy = st === 'recording' || st === 'paused';
   if ($('btn-rec-start')) $('btn-rec-start').disabled = !running || busy;
   if ($('btn-rec-with-audio')) {
@@ -1414,7 +1441,10 @@ async function stopAll() {
   faceUvTex = null;
   if (faceRecorder?.state !== 'idle') {
     faceRecorder.stop().then((blob) => {
-      if (blob) faceRecorder.download(blob);
+      if (blob) {
+        const { label } = getRecordOutputSize();
+        faceRecorder.download(blob, `face-follow-${label}-${Date.now()}`);
+      }
     });
   }
   audioLip?.stop();
@@ -1570,6 +1600,13 @@ function bindExtendedUi() {
   wireBackgroundCallbacks();
   initModelDropdown().catch(console.error);
 
+  applyDevicePreview();
+  $('record-device')?.addEventListener('change', () => {
+    applyDevicePreview();
+    updateRecordUi();
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  });
+
   $('bg-mode')?.addEventListener('change', () => {
     background?.setConfig({ mode: $('bg-mode').value });
     _bgImageEl = background?.getImageElement() ?? null;
@@ -1612,6 +1649,7 @@ function bindExtendedUi() {
   if ($('bg-mode') && background) $('bg-mode').value = background.config.mode;
   if ($('bg-color') && background) $('bg-color').value = background.config.color;
   if ($('bg-blur') && background) $('bg-blur').value = background.config.blurPx;
+  updateRecordUi();
 
   bindSensitivityPanel();
 
@@ -1699,11 +1737,12 @@ function bindExtendedUi() {
     audioLip.stop();
     updateRecordUi();
     if (blob) {
-      faceRecorder.download(blob, `face-follow-${Date.now()}`);
+      const { w, h, label } = getRecordOutputSize();
+      faceRecorder.download(blob, `face-follow-${label}-${w}x${h}-${Date.now()}`);
       if (statusEl) {
         statusEl.textContent = blob.type.includes('mp4')
-          ? 'Saved as MP4'
-          : 'Saved (WebM — MP4 transcode unavailable)';
+          ? `Saved as MP4 (${label} ${w}×${h})`
+          : `Saved WebM (${label} ${w}×${h}) — MP4 transcode unavailable`;
       }
     }
   });
