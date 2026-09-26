@@ -43,6 +43,31 @@ import { attachModelLikeBlender } from './faceFollowAlign.js';
 
 const MOUTH_EXPR_KEYS = ['aa', 'ih', 'ou', 'ee', 'oh'];
 
+/** Cached @pixiv/three-vrm module (avoid re-fetching CDN on every model load). */
+let _vrmModulePromise = null;
+function loadVrmModule() {
+  if (!_vrmModulePromise) {
+    _vrmModulePromise = import('@pixiv/three-vrm');
+  }
+  return _vrmModulePromise;
+}
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out (${Math.round(ms / 1000)}s)`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
 /** VRM presets driven by face tracking while audio owns mouth visemes. */
 const FACE_VRM_EXPR_KEYS = [
   'blinkLeft',
@@ -237,7 +262,7 @@ class FaceAvatar {
     return getLipSyncLerp();
   }
 
-  async init(loadTarget) {
+  async init(loadTarget, { onProgress, timeoutMs = 90000 } = {}) {
     const url =
       typeof loadTarget === 'string'
         ? loadTarget
@@ -246,12 +271,27 @@ class FaceAvatar {
           : loadTarget?.value;
     const revoke = typeof loadTarget === 'object' && loadTarget?.type === 'blob';
 
-    const { VRMLoaderPlugin } = await import('@pixiv/three-vrm');
+    const { VRMLoaderPlugin, VRMUtils } = await loadVrmModule();
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
     let gltf;
     try {
-      gltf = await loader.loadAsync(url);
+      gltf = await withTimeout(
+        new Promise((resolve, reject) => {
+          loader.load(
+            url,
+            resolve,
+            (evt) => {
+              if (!onProgress || !evt?.total) return;
+              onProgress(Math.min(99, Math.round((100 * evt.loaded) / evt.total)));
+            },
+            (err) => reject(err || new Error('GLTF load failed'))
+          );
+        }),
+        timeoutMs,
+        'Model download'
+      );
+      onProgress?.(100);
     } finally {
       if (revoke) URL.revokeObjectURL(url);
     }
@@ -260,7 +300,6 @@ class FaceAvatar {
     this.vrm = gltf.userData?.vrm ?? null;
     if (this.vrm) {
       try {
-        const { VRMUtils } = await import('@pixiv/three-vrm');
         VRMUtils.rotateVRM0(this.vrm);
       } catch {
         /* optional */
@@ -1376,24 +1415,39 @@ async function startTracking() {
   setHud('Load model (step 2) · sensitivity on Settings page');
 }
 
+let _modelLoadToken = 0;
+
 async function loadModelFace() {
   if (!running || !modelPivot || !faceAnchor) {
     setStatus('Start tracking first (step 1)', false);
     return;
   }
 
+  const token = ++_modelLoadToken;
   btnModel.disabled = true;
   try {
     const modelSelect = $('model-select');
     if (modelSelect) setSelectedModelId(modelSelect.value);
 
+    setStatus('Resolving model…', false);
     const source = await resolveModelSource();
-    setStatus(`Loading <em>${source.name}</em>…`, false);
+    if (token !== _modelLoadToken) return;
+
+    const via = source.fromFallback ? ' · CDN fallback' : '';
+    setStatus(`Loading <em>${source.name}</em>…${via}`, false);
 
     modelPivot.clear();
 
     avatar = new FaceAvatar();
-    const sceneRoot = await avatar.init(source);
+    const sceneRoot = await avatar.init(source, {
+      timeoutMs: 90000,
+      onProgress: (pct) => {
+        if (token !== _modelLoadToken) return;
+        setStatus(`Loading <em>${source.name}</em>… ${pct}%${via}`, false);
+      },
+    });
+    if (token !== _modelLoadToken) return;
+
     avatar.setExpressionOptions(getExpressionOptions());
 
     applyAutoFitToFace(sceneRoot, avatar.vrm);
@@ -1415,14 +1469,16 @@ async function loadModelFace() {
     const morphMapped = avatar.morphBindings?.length ?? 0;
     const sc = sceneRoot.scale.x.toFixed(2);
     setHud(
-      `Model: ${source.name}\nScene scale: ${sc}\nMeshes: ${avatar.morphTargetMeshes.length}\nMapped morphs: ${morphMapped}\nVRM expr: ${exprCount}`
+      `Model: ${source.name}${via}\nScene scale: ${sc}\nMeshes: ${avatar.morphTargetMeshes.length}\nMapped morphs: ${morphMapped}\nVRM expr: ${exprCount}`
     );
   } catch (err) {
+    if (token !== _modelLoadToken) return;
     console.error(err);
-    setStatus(`Load failed: ${err.message}`, false);
-    setHud(String(err.message));
+    const msg = err?.message || String(err);
+    setStatus(`Load failed: ${msg}`, false);
+    setHud(msg);
   } finally {
-    btnModel.disabled = false;
+    if (token === _modelLoadToken) btnModel.disabled = false;
   }
 }
 
