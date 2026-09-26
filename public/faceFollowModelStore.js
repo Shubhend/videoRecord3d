@@ -2,10 +2,13 @@
  * Same model list as js/modelStore.js — physical files under public/assets/models.
  * Built-ins fall back to a CDN sample when local files are missing (gitignored).
  */
-import { fetchData, putData } from '../js/assetsClient.js';
+import {
+  listUploadedModels,
+  fetchData,
+  putData,
+} from '../js/assetsClient.js';
 
 const FACE_MODEL_KEY = 'faceFollowSelectedModelId';
-const API_MODELS = '/api/assets/models';
 
 /** Pixiv sample (~10MB) — used when local AliciaSolid.vrm is absent. */
 const SAMPLE_VRM_CDN =
@@ -60,17 +63,40 @@ function withTimeout(promise, ms, label) {
   });
 }
 
-/** Fast assets-API read so a hanging /api never blocks model load. */
-async function listUploadedModelsFast(ms = 2000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
+/**
+ * Prefer live API (same as Models page), then static models.json.
+ * Never invent an empty index that could be written back over real uploads.
+ */
+async function readIndex() {
   try {
-    const res = await fetch(API_MODELS, { cache: 'no-store', signal: ctrl.signal });
-    if (!res.ok) throw new Error(`models API ${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(t);
+    const index = await withTimeout(listUploadedModels(), 6000, 'List models');
+    if (index && Array.isArray(index.models)) return index;
+  } catch (e) {
+    if (typeof console !== 'undefined') {
+      console.warn('[faceFollowModelStore] models API failed:', e && e.message ? e.message : e);
+    }
   }
+
+  try {
+    const res = await fetch(resolveAssetUrl('assets/data/models.json'), {
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const index = await res.json();
+      if (index && Array.isArray(index.models)) return index;
+    }
+  } catch (e) {
+    if (typeof console !== 'undefined') {
+      console.warn('[faceFollowModelStore] static models.json failed:', e && e.message ? e.message : e);
+    }
+  }
+
+  return {
+    models: [],
+    selectedModelId: DEFAULT_MODEL.id,
+    activeModelId: DEFAULT_MODEL.id,
+    _fallbackEmpty: true,
+  };
 }
 
 async function urlReachable(url, ms = 3000) {
@@ -94,21 +120,6 @@ async function urlReachable(url, ms = 3000) {
     return false;
   } finally {
     clearTimeout(t);
-  }
-}
-
-async function readIndex() {
-  try {
-    return await listUploadedModelsFast();
-  } catch (e) {
-    if (typeof console !== 'undefined') {
-      console.warn('[faceFollowModelStore] listModels failed:', e && e.message ? e.message : e);
-    }
-    return {
-      models: [],
-      selectedModelId: DEFAULT_MODEL.id,
-      activeModelId: DEFAULT_MODEL.id,
-    };
   }
 }
 
@@ -173,6 +184,7 @@ export function getSelectedModelId() {
   }
 }
 
+/** Persist selection only — never rewrite models[] (that wiped uploads when API failed). */
 export function setSelectedModelId(id) {
   try {
     localStorage.setItem(FACE_MODEL_KEY, id);
@@ -182,16 +194,10 @@ export function setSelectedModelId(id) {
   (async () => {
     try {
       const cur = (await fetchData('selection').catch(() => ({}))) || {};
-      await withTimeout(putData('selection', { ...cur, selectedModelId: id }), 2000, 'Save selection');
-      const index = await readIndex();
       await withTimeout(
-        putData('models', {
-          models: index.models || [],
-          selectedModelId: id,
-          activeModelId: index.activeModelId || id,
-        }),
-        2000,
-        'Save models index'
+        putData('selection', { ...cur, selectedModelId: id }),
+        3000,
+        'Save selection'
       );
     } catch (err) {
       console.warn('[faceFollowModelStore] selection save failed:', err);
@@ -205,7 +211,9 @@ export async function populateModelSelect(selectEl) {
   let selected = getSelectedModelId();
   try {
     const index = await readIndex();
-    if (index.selectedModelId) selected = index.selectedModelId;
+    if (index.selectedModelId && !index._fallbackEmpty) {
+      selected = index.selectedModelId;
+    }
   } catch {
     /* ignore */
   }
@@ -236,8 +244,11 @@ export async function populateModelSelect(selectEl) {
   if (validSelected) {
     selectEl.value = selected;
   } else {
-    const first = models[0];
-    selectEl.value = first.id;
-    setSelectedModelId(first.id);
+    selectEl.value = models[0].id;
+    try {
+      localStorage.setItem(FACE_MODEL_KEY, models[0].id);
+    } catch {
+      /* ignore */
+    }
   }
 }

@@ -1539,15 +1539,28 @@ function setRecordPanelUnlocked(on) {
 async function initModelDropdown() {
   const sel = $('model-select');
   await populateModelSelect(sel);
-  sel?.addEventListener('change', () => {
-    setSelectedModelId(sel.value);
-    if (modelLoaded && running) {
-      loadModelFace().catch((e) => {
-        console.error(e);
-        setStatus(`Reload failed: ${e.message}`, false);
-      });
-    }
-  });
+  if (sel && !sel.dataset.boundChange) {
+    sel.dataset.boundChange = '1';
+    sel.addEventListener('change', () => {
+      setSelectedModelId(sel.value);
+      if (modelLoaded && running) {
+        loadModelFace().catch((e) => {
+          console.error(e);
+          setStatus(`Reload failed: ${e.message}`, false);
+        });
+      }
+    });
+  }
+  if (!window.__faceFollowModelsFocusBound) {
+    window.__faceFollowModelsFocusBound = true;
+    const refresh = () => {
+      populateModelSelect($('model-select')).catch(() => {});
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refresh();
+    });
+  }
 }
 
 function syncSensitivityInputsFromSettings() {
