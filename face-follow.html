@@ -32,9 +32,8 @@
         position: relative;
         overflow: hidden;
         background: transparent;
-        transition: width 0.15s ease, height 0.15s ease;
       }
-      /* Letterbox live frame to device aspect — do NOT override video/canvas CSS */
+      /* Letterbox live frame to device aspect — MindAR owns video/canvas layout */
       #container.device-preview {
         max-width: 100%;
         max-height: 100%;
@@ -71,11 +70,11 @@
         width: min(100%, calc(100vh - 52px));
         height: auto;
       }
-      /* Stack: live camera (1) → color/image overlay (1, later in DOM) → 3D canvas (2) */
+      /* Stack: live camera → overlay → 3D canvas.
+         Do not set position/size/object-fit on video or canvas — MindAR _resize
+         cover-aligns them to the camera feed; overriding stretches the UV mesh. */
       #container video {
         z-index: 1 !important;
-        object-fit: cover;
-        position: relative;
       }
       #container canvas {
         z-index: 2 !important;

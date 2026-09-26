@@ -1089,7 +1089,11 @@ function getSelectedRecordDevice() {
   return $('record-device')?.value || 'auto';
 }
 
-/** Letterbox the live container to the device aspect (keeps MindAR video/canvas CSS alone). */
+/**
+ * Letterbox the live container to the device aspect.
+ * Only trigger MindAR's own _resize — never setSize/camera.aspect yourself
+ * (that stretches the UV face mesh vs the camera feed).
+ */
 function applyDevicePreview() {
   if (!container) return;
   const key = getSelectedRecordDevice();
@@ -1100,23 +1104,12 @@ function applyDevicePreview() {
     container.classList.add('device-preview');
     container.setAttribute('data-device', key);
   }
-  // Let MindAR / Three pick up the new container size without forcing video CSS.
+  // Wait for CSS layout, then let MindAR re-cover video + canvas together.
   requestAnimationFrame(() => {
-    syncMindarToContainer();
-    window.dispatchEvent(new Event('resize'));
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
   });
-}
-
-/** Match renderer (+ camera) to container after a device frame change. */
-function syncMindarToContainer() {
-  if (!container || !renderer) return;
-  const w = Math.max(2, container.clientWidth | 0);
-  const h = Math.max(2, container.clientHeight | 0);
-  renderer.setSize(w, h, false);
-  if (camera) {
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
 }
 
 function getRecordOutputSize() {
@@ -1623,11 +1616,6 @@ function bindExtendedUi() {
   $('record-device')?.addEventListener('change', () => {
     applyDevicePreview();
     updateRecordUi();
-  });
-  window.addEventListener('resize', () => {
-    if (getSelectedRecordDevice() !== 'auto') {
-      requestAnimationFrame(() => syncMindarToContainer());
-    }
   });
 
   $('bg-mode')?.addEventListener('change', () => {
