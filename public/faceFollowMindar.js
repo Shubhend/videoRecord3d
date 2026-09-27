@@ -130,6 +130,7 @@ const btnModel = $('btn-model');
 const btnStop = $('btn-stop');
 const btnResetPlacement = $('btn-reset-placement');
 const showMeshInput = $('show-mesh');
+const showFaceMeshInput = $('show-face-mesh');
 const showPipInput = $('show-pip');
 const videoFeed = $('video-feed');
 const tuningPanel = $('tuning-panel');
@@ -1058,6 +1059,7 @@ function addFaceMesh() {
 
   scene.add(faceMesh);
   setFaceMeshStyle(showMeshInput?.checked === true);
+  updateFaceShellVisibility();
 }
 
 function setFaceMeshStyle(showUvDebug) {
@@ -1247,11 +1249,12 @@ function smoothFaceAnchorPose() {
   g.quaternion.copy(_smoothAnchorQuat);
 }
 
-/** Hide colorful MindAR shell when avatar is on (stops “mask on top of face”). */
+/** Hide colorful MindAR shell when avatar is on, or when user unchecks Show face mesh. */
 function updateFaceShellVisibility() {
   if (!faceMesh) return;
+  const showMesh = showFaceMeshInput?.checked !== false;
   const showDebug = showMeshInput?.checked === true;
-  faceMesh.visible = !modelLoaded || showDebug;
+  faceMesh.visible = showMesh && (!modelLoaded || showDebug);
 }
 
 let _exprOptsCache = null;
@@ -1924,6 +1927,10 @@ function applyPresetData(preset) {
   }
   setLastPresetId(preset.id);
 }
+
+showFaceMeshInput?.addEventListener('change', () => {
+  updateFaceShellVisibility();
+});
 
 showMeshInput?.addEventListener('change', () => {
   setFaceMeshStyle(showMeshInput.checked);
