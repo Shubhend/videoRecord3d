@@ -1573,7 +1573,11 @@ async function stopRawCapture() {
   try {
     const saved = await saveRawVideo(name, blob);
     if ($('raw-name')) $('raw-name').value = saved;
-    await refreshRawList(saved);
+    try {
+      await refreshRawList(saved);
+    } catch (err) {
+      console.error(err);
+    }
     setRawStatus(`Saved assets/recordings/${saved}.webm`);
   } catch (err) {
     console.error(err);

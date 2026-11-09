@@ -16,7 +16,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -92,15 +91,15 @@ function recordingFile(name) {
 
 async function writeRecording(req, filePath) {
   await fsp.mkdir(RECORDINGS_DIR, { recursive: true });
+  const buf = await readBody(req);
+  if (!buf.length) {
+    const err = new Error('Empty recording');
+    err.status = 400;
+    throw err;
+  }
   const tmp = `${filePath}.partial`;
   try {
-    await pipeline(req, fs.createWriteStream(tmp));
-    const stat = await fsp.stat(tmp);
-    if (!stat.size) {
-      const err = new Error('Empty recording');
-      err.status = 400;
-      throw err;
-    }
+    await fsp.writeFile(tmp, buf);
     await fsp.rename(tmp, filePath);
   } catch (err) {
     await fsp.unlink(tmp).catch(() => {});
@@ -371,7 +370,7 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/assets/recordings' && req.method === 'POST') {
-    const target = recordingFile(url.searchParams.get('name'));
+    const target = recordingFile(url.searchParams.get('name') || req.headers['x-recording-name']);
     if (!target) {
       sendJson(res, 400, { error: 'Enter a name using letters, numbers, spaces, or hyphens' });
       return true;

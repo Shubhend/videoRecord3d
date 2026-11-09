@@ -39,10 +39,13 @@ export async function saveRawVideo(name, blob) {
   const safe = sanitizeRawName(name);
   const res = await fetch(`./api/assets/recordings?name=${encodeURIComponent(safe)}`, {
     method: 'POST',
-    headers: { 'Content-Type': blob.type || 'video/webm' },
+    headers: { 'X-Recording-Name': safe },
     body: blob,
   });
-  if (!res.ok) throw new Error(await readError(res));
+  if (!res.ok) {
+    const detail = await readError(res);
+    throw new Error(detail === 'Not Found' ? 'Save route missing. Restart the dev server and try again.' : detail);
+  }
   const data = await res.json();
   return data.name || safe;
 }
