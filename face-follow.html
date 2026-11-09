@@ -136,11 +136,28 @@
         background: #0a0e14;
         border: 1px solid #2a3544;
       }
-      #record-status, #audio-status {
+      #record-status, #audio-status, #raw-status {
         font-size: 11px;
         color: #9aa8b8;
         margin: 4px 0;
       }
+      #raw-panel h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #9aa8b8;
+      }
+      #raw-name {
+        width: 100%;
+        margin: 6px 0;
+        padding: 6px 8px;
+        border: 1px solid #2a3544;
+        border-radius: 6px;
+        background: #0a0e14;
+        color: #e8ecf0;
+        font-size: 12px;
+      }
+      #btn-raw-delete { margin-top: 6px; width: 100%; }
       #tuning-panel h3 {
         margin: 0 0 8px;
         font-size: 12px;
@@ -271,6 +288,21 @@
         <input type="checkbox" id="show-pip" />
         Show camera PiP (blender.html)
       </label>
+      <div id="raw-panel" class="panel">
+        <h3>Raw recordings</h3>
+        <p id="raw-status">Live camera. Record a take to reuse it.</p>
+        <input type="text" id="raw-name" placeholder="Name this recording" maxlength="80" />
+        <div class="btn-row">
+          <button type="button" id="btn-raw-rec" class="secondary">Record raw</button>
+          <button type="button" id="btn-raw-stop" class="secondary" disabled>Stop and save</button>
+        </div>
+        <label for="raw-select">Source</label>
+        <select id="raw-select" aria-label="Face source">
+          <option value="">Live camera</option>
+        </select>
+        <button type="button" id="btn-raw-delete" class="tertiary" disabled>Delete selected</button>
+      </div>
+
       <div id="record-panel" class="panel locked">
         <h3>Record video (MP4)</h3>
         <p id="record-status">Record: idle · exports .mp4</p>

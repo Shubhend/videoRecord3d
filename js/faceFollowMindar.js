@@ -36,6 +36,13 @@ import {
   getLastPresetId,
   normalizePreset,
 } from './faceFollowPlacementPresets.js';
+import {
+  listRawVideos,
+  saveRawVideo,
+  deleteRawVideo,
+  rawVideoUrl,
+  sanitizeRawName,
+} from './faceFollowRawStore.js';
 
 const MOUTH_EXPR_KEYS = ['aa', 'ih', 'ou', 'ee', 'oh'];
 
@@ -652,6 +659,13 @@ let background = null;
 let faceRecorder = null;
 let audioLip = null;
 let _bgImageEl = null;
+let rawPlaybackVideo = null;
+let rawRecorder = null;
+let rawChunks = [];
+let rawCameraStream = null;
+let rawOwnsCamera = false;
+let rawTick = null;
+let rawStartedAt = 0;
 
 function loadPlacement() {
   try {
@@ -1234,12 +1248,257 @@ async function setup() {
   addFaceMesh();
 }
 
+function stopRawPlayback() {
+  const video = rawPlaybackVideo;
+  rawPlaybackVideo = null;
+  if (!video) return;
+  video.pause();
+  video.removeAttribute('src');
+  try {
+    video.load();
+  } catch {
+    /* element already detached */
+  }
+  video.remove();
+}
+
+function liveCameraStream() {
+  if (rawPlaybackVideo) return null;
+  const stream = mindarThree?.video?.srcObject;
+  const track = stream?.getVideoTracks?.()[0];
+  if (!track || track.readyState !== 'live') return null;
+  return stream;
+}
+
+function pickRawMime() {
+  const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  if (typeof MediaRecorder === 'undefined') return '';
+  for (const type of types) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return '';
+}
+
+function setRawStatus(text) {
+  const el = $('raw-status');
+  if (el) el.textContent = text;
+}
+
+function updateRawDeleteButton() {
+  const btn = $('btn-raw-delete');
+  if (btn) btn.disabled = !$('raw-select')?.value;
+}
+
+async function refreshRawList(preferName = '') {
+  const sel = $('raw-select');
+  const previous = preferName || sel?.value || '';
+  try {
+    const names = await listRawVideos();
+    if (sel) {
+      sel.innerHTML = '<option value="">Live camera</option>';
+      for (const name of names) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      }
+      sel.value = names.includes(previous) ? previous : '';
+    }
+    updateRawDeleteButton();
+    if (!rawRecorder) {
+      setRawStatus(
+        names.length ? `${names.length} saved in recordings/` : 'No saved recordings yet'
+      );
+    }
+    return names;
+  } catch (err) {
+    console.error(err);
+    setRawStatus('Recordings folder unavailable. Open this page with the dev server.');
+    updateRawDeleteButton();
+    return [];
+  }
+}
+
+function releaseRawCamera() {
+  if (rawOwnsCamera && rawCameraStream) {
+    rawCameraStream.getTracks().forEach((track) => track.stop());
+  }
+  rawCameraStream = null;
+  rawOwnsCamera = false;
+}
+
+async function startRawCapture() {
+  if (rawRecorder) return;
+  if (typeof MediaRecorder === 'undefined') {
+    setRawStatus('Recording is not supported in this browser');
+    return;
+  }
+  const recBtn = $('btn-raw-rec');
+  const stopBtn = $('btn-raw-stop');
+  if (recBtn) recBtn.disabled = true;
+  try {
+    const shared = liveCameraStream();
+    if (shared) {
+      rawCameraStream = new MediaStream(shared.getVideoTracks());
+      rawOwnsCamera = false;
+    } else {
+      rawCameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      rawOwnsCamera = true;
+    }
+    const mimeType = pickRawMime();
+    const opts = { videoBitsPerSecond: 4_000_000 };
+    if (mimeType) opts.mimeType = mimeType;
+    rawChunks = [];
+    rawRecorder = new MediaRecorder(rawCameraStream, opts);
+    rawRecorder.ondataavailable = (event) => {
+      if (event.data?.size) rawChunks.push(event.data);
+    };
+    rawRecorder.start(1000);
+    rawCameraStream.getVideoTracks()[0]?.addEventListener('ended', () => {
+      if (!rawRecorder || rawRecorder.state === 'inactive') return;
+      setRawStatus('Camera closed. Press Stop and save to keep this take.');
+    });
+    rawStartedAt = performance.now();
+    if (stopBtn) stopBtn.disabled = false;
+    if (rawTick) clearInterval(rawTick);
+    rawTick = setInterval(() => {
+      const sec = Math.floor((performance.now() - rawStartedAt) / 1000);
+      setRawStatus(`Recording raw… ${sec}s`);
+    }, 500);
+    setRawStatus('Recording raw… 0s');
+  } catch (err) {
+    console.error(err);
+    releaseRawCamera();
+    rawRecorder = null;
+    if (recBtn) recBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
+    setRawStatus(`Camera failed: ${err.message}`);
+  }
+}
+
+async function stopRawCapture() {
+  const recorder = rawRecorder;
+  const stopBtn = $('btn-raw-stop');
+  const recBtn = $('btn-raw-rec');
+  if (!recorder) return;
+  if (stopBtn) stopBtn.disabled = true;
+  if (rawTick) {
+    clearInterval(rawTick);
+    rawTick = null;
+  }
+  setRawStatus('Saving…');
+  const mime = recorder.mimeType || 'video/webm';
+  const blob = await new Promise((resolve) => {
+    recorder.onstop = () => resolve(new Blob(rawChunks, { type: mime }));
+    if (recorder.state === 'inactive') resolve(new Blob(rawChunks, { type: mime }));
+    else recorder.stop();
+  });
+  rawRecorder = null;
+  rawChunks = [];
+  releaseRawCamera();
+  if (!blob.size) {
+    if (recBtn) recBtn.disabled = false;
+    setRawStatus('Recording was empty');
+    return;
+  }
+  let name = $('raw-name')?.value?.trim() || '';
+  if (!name) name = `take-${Date.now()}`;
+  try {
+    const saved = await saveRawVideo(name, blob);
+    if ($('raw-name')) $('raw-name').value = saved;
+    await refreshRawList(saved);
+    setRawStatus(`Saved recordings/${saved}.webm`);
+  } catch (err) {
+    console.error(err);
+    setRawStatus(`Save failed: ${err.message}`);
+  } finally {
+    if (recBtn) recBtn.disabled = false;
+  }
+}
+
+async function startFromRecording(name) {
+  stopRawPlayback();
+  const video = document.createElement('video');
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.setAttribute('playsinline', '');
+  video.style.cssText =
+    'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
+  document.body.appendChild(video);
+  rawPlaybackVideo = video;
+  video.src = `${rawVideoUrl(name)}?v=${Date.now()}`;
+  await new Promise((resolve, reject) => {
+    video.addEventListener('loadeddata', () => resolve(), { once: true });
+    video.addEventListener(
+      'error',
+      () => reject(new Error(`Could not load recording “${name}”`)),
+      { once: true }
+    );
+  });
+  await video.play();
+  video.addEventListener('ended', () => {
+    video.pause();
+  });
+
+  const media = navigator.mediaDevices;
+  const orig = media.getUserMedia.bind(media);
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    media.getUserMedia = orig;
+  };
+  media.getUserMedia = async () => {
+    try {
+      if (video.paused) {
+        try {
+          await video.play();
+        } catch {
+          /* last frame stays if the file has already ended */
+        }
+      }
+      const stream = typeof video.captureStream === 'function' ? video.captureStream() : null;
+      if (!stream?.getVideoTracks().length) {
+        throw new Error('This browser cannot use a saved recording for face tracking');
+      }
+      return stream;
+    } finally {
+      restore();
+    }
+  };
+  try {
+    await mindarThree.start();
+  } catch (err) {
+    restore();
+    try {
+      if (mindarThree?.video?.srcObject) mindarThree.stop();
+      else mindarThree?.video?.remove();
+    } catch {
+      mindarThree?.video?.remove();
+    }
+    stopRawPlayback();
+    throw new Error(err?.message || `Could not track faces in “${name}”`);
+  } finally {
+    restore();
+  }
+}
+
 async function startTracking() {
   btnStart.disabled = true;
-  setStatus('Starting MindAR…', false);
+  const selected = $('raw-select')?.value || '';
+  setStatus(selected ? `Starting from “${selected}”…` : 'Starting MindAR…', false);
   if (!mindarThree) await setup();
 
-  await mindarThree.start();
+  if (selected) await startFromRecording(selected);
+  else {
+    stopRawPlayback();
+    await mindarThree.start();
+  }
   syncVideoFeed();
   mindarThree.video?.play?.().catch(() => {});
   background?.refresh();
@@ -1255,7 +1514,8 @@ async function startTracking() {
   applyPlacement();
   background?.refresh();
   updateRecordUi();
-  setStatus('<strong>Step 1 OK:</strong> Tracking + record ready', true);
+  const sourceLabel = selected ? `recording “${selected}”` : 'live camera';
+  setStatus(`<strong>Step 1 OK:</strong> Tracking ${sourceLabel}`, true);
   setHud('Load model (step 2) · sensitivity on Settings page');
 }
 
@@ -1310,7 +1570,12 @@ async function loadModelFace() {
 
 async function stopAll() {
   if (mindarThree) {
-    mindarThree.stop();
+    try {
+      mindarThree.stop();
+    } catch (err) {
+      console.warn(err);
+      mindarThree.video?.remove();
+    }
     renderer?.setAnimationLoop?.(null);
   }
   if (videoFeed?.srcObject) {
@@ -1337,6 +1602,7 @@ async function stopAll() {
   }
   audioLip?.stop();
   background?.stopScreenShare?.();
+  stopRawPlayback();
   container.innerHTML = '';
   background = null;
   _bgImageEl = null;
@@ -1688,6 +1954,55 @@ btnModel.addEventListener('click', () => {
 
 btnStop.addEventListener('click', () => stopAll());
 
+function bindRawControls() {
+  refreshRawList().catch(console.error);
+  $('raw-select')?.addEventListener('change', () => {
+    updateRawDeleteButton();
+    const name = $('raw-select')?.value;
+    if (running) {
+      setStatus('Stop, then start again to use the new source', false);
+    } else if (name) {
+      setRawStatus(`Source: ${name}`);
+    }
+  });
+  $('btn-raw-rec')?.addEventListener('click', () => {
+    const typed = $('raw-name')?.value?.trim();
+    if (typed) {
+      try {
+        sanitizeRawName(typed);
+      } catch (err) {
+        setRawStatus(err.message);
+        return;
+      }
+    }
+    startRawCapture().catch((err) => {
+      console.error(err);
+      setRawStatus(err.message);
+    });
+  });
+  $('btn-raw-stop')?.addEventListener('click', () => {
+    stopRawCapture().catch((err) => {
+      console.error(err);
+      setRawStatus(`Save failed: ${err.message}`);
+      const recBtn = $('btn-raw-rec');
+      if (recBtn) recBtn.disabled = false;
+    });
+  });
+  $('btn-raw-delete')?.addEventListener('click', () => {
+    const name = $('raw-select')?.value;
+    if (!name) return;
+    if (!window.confirm(`Delete recordings/${name}.webm?`)) return;
+    deleteRawVideo(name)
+      .then(() => refreshRawList())
+      .then(() => setRawStatus(`Deleted ${name}`))
+      .catch((err) => {
+        console.error(err);
+        setRawStatus(`Delete failed: ${err.message}`);
+      });
+  });
+}
+
 bindPlacementControls();
 bindExtendedUi();
+bindRawControls();
 setRecordPanelUnlocked(false);
