@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,7 @@ const ASSETS = path.join(ROOT, 'public', 'assets');
 const MODELS_DIR = path.join(ASSETS, 'models');
 const BACKGROUNDS_DIR = path.join(ASSETS, 'backgrounds');
 const DATA_DIR = path.join(ASSETS, 'data');
+const RECORDINGS_DIR = path.join(ASSETS, 'recordings');
 const MODELS_INDEX = path.join(DATA_DIR, 'models.json');
 
 const DATA_ALLOW = new Set([
@@ -67,10 +69,59 @@ function safeId(id) {
   return s;
 }
 
+function sanitizeRawName(input) {
+  const cleaned = String(input || '')
+    .trim()
+    .replace(/\.webm$/i, '')
+    .replace(/[^a-zA-Z0-9 _-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!cleaned || cleaned.length > 80) return '';
+  return cleaned;
+}
+
+function recordingFile(name) {
+  const safe = sanitizeRawName(name);
+  if (!safe) return null;
+  const root = path.resolve(RECORDINGS_DIR);
+  const file = path.resolve(root, `${safe}.webm`);
+  if (file !== path.join(root, `${safe}.webm`)) return null;
+  return { safe, file };
+}
+
+async function writeRecording(req, filePath) {
+  await fsp.mkdir(RECORDINGS_DIR, { recursive: true });
+  const tmp = `${filePath}.partial`;
+  try {
+    await pipeline(req, fs.createWriteStream(tmp));
+    const stat = await fsp.stat(tmp);
+    if (!stat.size) {
+      const err = new Error('Empty recording');
+      err.status = 400;
+      throw err;
+    }
+    await fsp.rename(tmp, filePath);
+  } catch (err) {
+    await fsp.unlink(tmp).catch(() => {});
+    throw err;
+  }
+}
+
+async function listRecordings() {
+  await fsp.mkdir(RECORDINGS_DIR, { recursive: true });
+  const entries = await fsp.readdir(RECORDINGS_DIR);
+  return entries
+    .filter((name) => name.toLowerCase().endsWith('.webm') && !name.endsWith('.partial'))
+    .map((name) => name.slice(0, -5))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 async function ensureDirs() {
   await fsp.mkdir(MODELS_DIR, { recursive: true });
   await fsp.mkdir(BACKGROUNDS_DIR, { recursive: true });
   await fsp.mkdir(DATA_DIR, { recursive: true });
+  await fsp.mkdir(RECORDINGS_DIR, { recursive: true });
   if (!fs.existsSync(MODELS_INDEX)) {
     await fsp.writeFile(
       MODELS_INDEX,
@@ -311,6 +362,41 @@ async function handleApi(req, res, url) {
       /* ignore */
     }
     sendJson(res, 200, { ok: true });
+    return true;
+  }
+
+  if (pathname === '/api/assets/recordings' && req.method === 'GET') {
+    sendJson(res, 200, { names: await listRecordings() });
+    return true;
+  }
+
+  if (pathname === '/api/assets/recordings' && req.method === 'POST') {
+    const target = recordingFile(url.searchParams.get('name'));
+    if (!target) {
+      sendJson(res, 400, { error: 'Enter a name using letters, numbers, spaces, or hyphens' });
+      return true;
+    }
+    await writeRecording(req, target.file);
+    sendJson(res, 200, { name: target.safe });
+    return true;
+  }
+
+  const recMatch = pathname.match(/^\/api\/assets\/recordings\/([^/]+)$/);
+  if (recMatch && req.method === 'DELETE') {
+    const target = recordingFile(decodeURIComponent(recMatch[1]));
+    if (!target) {
+      sendJson(res, 400, { error: 'Invalid recording name' });
+      return true;
+    }
+    try {
+      await fsp.unlink(target.file);
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+      sendJson(res, 404, { error: 'Recording not found' });
+      return true;
+    }
+    res.statusCode = 204;
+    res.end();
     return true;
   }
 

@@ -6,3 +6,5 @@ public/assets/models/*
 !public/assets/models/.gitkeep
 public/assets/backgrounds/*
 !public/assets/backgrounds/.gitkeep
+public/assets/recordings/*
+!public/assets/recordings/.gitkeep
