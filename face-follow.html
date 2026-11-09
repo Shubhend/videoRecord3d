@@ -141,6 +141,11 @@
         color: #9aa8b8;
         margin: 4px 0;
       }
+      #source-hint {
+        margin: 4px 0 8px;
+        font-size: 11px;
+        color: #9aa8b8;
+      }
       #raw-panel h3 {
         margin: 0 0 8px;
         font-size: 12px;
@@ -269,6 +274,11 @@
     <div id="control">
       <div id="status" class="panel warn"><strong>Step 1:</strong> Start tracking</div>
       <pre id="hud" class="hud">Face mesh: off</pre>
+      <label for="raw-select">Face source</label>
+      <select id="raw-select" aria-label="Face source">
+        <option value="">Live camera</option>
+      </select>
+      <p id="source-hint">Pick a saved recording to track without the live camera.</p>
       <button type="button" id="btn-start" class="primary">1. Start face mesh tracking</button>
       <div class="panel" id="model-panel">
         <h3>Avatar model</h3>
@@ -290,16 +300,12 @@
       </label>
       <div id="raw-panel" class="panel">
         <h3>Raw recordings</h3>
-        <p id="raw-status">Live camera. Record a take to reuse it.</p>
+        <p id="raw-status">Record a take, then choose it in Face source at the top.</p>
         <input type="text" id="raw-name" placeholder="Name this recording" maxlength="80" />
         <div class="btn-row">
           <button type="button" id="btn-raw-rec" class="secondary">Record raw</button>
           <button type="button" id="btn-raw-stop" class="secondary" disabled>Stop and save</button>
         </div>
-        <label for="raw-select">Source</label>
-        <select id="raw-select" aria-label="Face source">
-          <option value="">Live camera</option>
-        </select>
         <button type="button" id="btn-raw-delete" class="tertiary" disabled>Delete selected</button>
       </div>
 

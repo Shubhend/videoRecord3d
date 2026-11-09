@@ -1284,9 +1284,19 @@ function setRawStatus(text) {
   if (el) el.textContent = text;
 }
 
-function updateRawDeleteButton() {
-  const btn = $('btn-raw-delete');
-  if (btn) btn.disabled = !$('raw-select')?.value;
+function updateRawSourceUi() {
+  const name = $('raw-select')?.value || '';
+  const del = $('btn-raw-delete');
+  if (del) del.disabled = !name;
+  if (btnStart) {
+    btnStart.textContent = name ? '1. Start from recording' : '1. Start face mesh tracking';
+  }
+  const hint = $('source-hint');
+  if (hint) {
+    hint.textContent = name
+      ? `Tracking will use “${name}”. The live camera stays off.`
+      : 'Pick a saved recording to track without the live camera.';
+  }
 }
 
 async function refreshRawList(preferName = '') {
@@ -1304,7 +1314,7 @@ async function refreshRawList(preferName = '') {
       }
       sel.value = names.includes(previous) ? previous : '';
     }
-    updateRawDeleteButton();
+    updateRawSourceUi();
     if (!rawRecorder) {
       setRawStatus(
         names.length ? `${names.length} saved in recordings/` : 'No saved recordings yet'
@@ -1314,7 +1324,7 @@ async function refreshRawList(preferName = '') {
   } catch (err) {
     console.error(err);
     setRawStatus('Recordings folder unavailable. Open this page with the dev server.');
-    updateRawDeleteButton();
+    updateRawSourceUi();
     return [];
   }
 }
@@ -1957,12 +1967,12 @@ btnStop.addEventListener('click', () => stopAll());
 function bindRawControls() {
   refreshRawList().catch(console.error);
   $('raw-select')?.addEventListener('change', () => {
-    updateRawDeleteButton();
+    updateRawSourceUi();
     const name = $('raw-select')?.value;
     if (running) {
       setStatus('Stop, then start again to use the new source', false);
     } else if (name) {
-      setRawStatus(`Source: ${name}`);
+      setRawStatus(`Selected ${name}. Press Start from recording.`);
     }
   });
   $('btn-raw-rec')?.addEventListener('click', () => {
