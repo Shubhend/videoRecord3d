@@ -146,10 +146,19 @@
         font-size: 11px;
         color: #9aa8b8;
       }
+      #raw-panel {
+        border-color: #3b82f6;
+      }
       #raw-panel h3 {
         margin: 0 0 8px;
         font-size: 12px;
         font-weight: 600;
+        color: #9aa8b8;
+      }
+      #raw-panel label {
+        display: block;
+        margin-top: 4px;
+        font-size: 12px;
         color: #9aa8b8;
       }
       #raw-name {
@@ -272,13 +281,23 @@
     <video id="video-feed" playsinline muted autoplay></video>
 
     <div id="control">
+      <div id="raw-panel" class="panel">
+        <h3>Recording source</h3>
+        <label for="raw-select">Use a saved recording</label>
+        <select id="raw-select" aria-label="Face source">
+          <option value="">Live camera</option>
+        </select>
+        <p id="source-hint">Choose a saved recording to track without the live camera.</p>
+        <p id="raw-status">Record a take, then pick it above.</p>
+        <input type="text" id="raw-name" placeholder="Name this recording" maxlength="80" />
+        <div class="btn-row">
+          <button type="button" id="btn-raw-rec" class="secondary">Record raw</button>
+          <button type="button" id="btn-raw-stop" class="secondary" disabled>Stop and save</button>
+        </div>
+        <button type="button" id="btn-raw-delete" class="tertiary" disabled>Delete selected</button>
+      </div>
       <div id="status" class="panel warn"><strong>Step 1:</strong> Start tracking</div>
       <pre id="hud" class="hud">Face mesh: off</pre>
-      <label for="raw-select">Face source</label>
-      <select id="raw-select" aria-label="Face source">
-        <option value="">Live camera</option>
-      </select>
-      <p id="source-hint">Pick a saved recording to track without the live camera.</p>
       <button type="button" id="btn-start" class="primary">1. Start face mesh tracking</button>
       <div class="panel" id="model-panel">
         <h3>Avatar model</h3>
@@ -298,16 +317,6 @@
         <input type="checkbox" id="show-pip" />
         Show camera PiP (blender.html)
       </label>
-      <div id="raw-panel" class="panel">
-        <h3>Raw recordings</h3>
-        <p id="raw-status">Record a take, then choose it in Face source at the top.</p>
-        <input type="text" id="raw-name" placeholder="Name this recording" maxlength="80" />
-        <div class="btn-row">
-          <button type="button" id="btn-raw-rec" class="secondary">Record raw</button>
-          <button type="button" id="btn-raw-stop" class="secondary" disabled>Stop and save</button>
-        </div>
-        <button type="button" id="btn-raw-delete" class="tertiary" disabled>Delete selected</button>
-      </div>
 
       <div id="record-panel" class="panel locked">
         <h3>Record video (MP4)</h3>

@@ -6,6 +6,10 @@ import { rawVideosPlugin } from './vite.rawVideos.js';
 export default defineConfig({
   base: './',
   plugins: [react(), rawVideosPlugin(__dirname)],
+  server: {
+    port: 3003,
+    strictPort: true,
+  },
   resolve: {
     alias: {
       'mindar-face-three': resolve(__dirname, 'node_modules/mind-ar/dist/mindar-face-three.prod.js'),
