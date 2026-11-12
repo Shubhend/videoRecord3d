@@ -37,6 +37,7 @@ import {
 import {
   listRawVideos,
   saveRawVideo,
+  saveOutputVideo,
   deleteRawVideo,
   rawVideoUrl,
   sanitizeRawName,
@@ -775,6 +776,8 @@ let rawCameraStream = null;
 let rawOwnsCamera = false;
 let rawTick = null;
 let rawStartedAt = 0;
+let urlJobRecording = false;
+let finishingOutput = false;
 
 function loadPlacement() {
   try {
@@ -1611,6 +1614,7 @@ async function startFromRecording(name) {
   await video.play();
   video.addEventListener('ended', () => {
     video.pause();
+    if (urlJobRecording) finishRecordedVideo().catch(console.error);
   });
 
   const media = navigator.mediaDevices;
@@ -2087,26 +2091,125 @@ function bindExtendedUi() {
     }
     updateRecordUi();
   });
-  $('btn-rec-stop')?.addEventListener('click', async () => {
-    const statusEl = $('record-status');
+  $('btn-rec-stop')?.addEventListener('click', () => {
+    finishRecordedVideo().catch((err) => {
+      console.error(err);
+      const statusEl = $('record-status');
+      if (statusEl) statusEl.textContent = `Save failed: ${err.message}`;
+    });
+  });
+}
+
+function showOutputUrl(path) {
+  const box = $('output-url');
+  if (!box || !path) return;
+  const href = new URL(path.replace(/^\.\//, ''), document.baseURI).href;
+  box.hidden = false;
+  box.replaceChildren();
+  box.append('Video URL: ');
+  const link = document.createElement('a');
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = href;
+  box.append(link);
+}
+
+async function finishRecordedVideo() {
+  if (finishingOutput || !faceRecorder || faceRecorder.state === 'idle') return;
+  finishingOutput = true;
+  urlJobRecording = false;
+  const statusEl = $('record-status');
+  try {
     faceRecorder.onConvertProgress = (pct) => {
       if (statusEl) statusEl.textContent = `Converting to MP4… ${pct}%`;
     };
     if (statusEl) statusEl.textContent = 'Stopping…';
     const blob = await faceRecorder.stop();
     faceRecorder.onConvertProgress = null;
-    audioLip.stop();
+    audioLip?.stop();
     updateRecordUi();
-    if (blob) {
-      const { w, h, label } = getRecordOutputSize();
-      faceRecorder.download(blob, `face-follow-${label}-${w}x${h}-${Date.now()}`);
-      if (statusEl) {
-        statusEl.textContent = blob.type.includes('mp4')
-          ? `Saved as MP4 (${label} ${w}×${h})`
-          : `Saved WebM (${label} ${w}×${h}) — MP4 transcode unavailable`;
-      }
+    if (!blob) return;
+    const { w, h, label } = getRecordOutputSize();
+    faceRecorder.download(blob, `face-follow-${label}-${w}x${h}-${Date.now()}`);
+    if (statusEl) statusEl.textContent = 'Saving video URL…';
+    const url = await saveOutputVideo(blob);
+    showOutputUrl(url);
+    if (statusEl) {
+      statusEl.textContent = blob.type.includes('mp4')
+        ? `Saved as MP4 (${label} ${w}×${h})`
+        : `Saved WebM (${label} ${w}×${h}) — MP4 transcode unavailable`;
     }
-  });
+  } finally {
+    finishingOutput = false;
+  }
+}
+
+function readJobQuery() {
+  const q = new URLSearchParams(location.search);
+  return {
+    recording: (q.get('recording') || '').trim(),
+    model: (q.get('model') || '').trim(),
+    audio: (q.get('audio') || '').trim(),
+  };
+}
+
+async function selectModelFromQuery(query) {
+  const sel = $('model-select');
+  await populateModelSelect(sel);
+  const needle = query.toLowerCase();
+  const match = [...(sel?.options || [])].find(
+    (opt) => opt.value.toLowerCase() === needle || opt.textContent.trim().toLowerCase() === needle
+  );
+  if (!match) throw new Error(`Model not found: ${query}`);
+  sel.value = match.value;
+  setSelectedModelId(match.value);
+}
+
+async function loadAudioFromUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Audio URL failed (${res.status})`);
+  const blob = await res.blob();
+  const base = decodeURIComponent(url.split('?')[0].split('/').pop() || 'audio');
+  const file = new File([blob], base, { type: blob.type || 'audio/mpeg' });
+  const app = getAppExpressionSensitivities();
+  audioLip.setIntensity(app.audioLipSyncMultiplier);
+  const info = await audioLip.loadFile(file);
+  audioLip.setIntensity(app.audioLipSyncMultiplier);
+  if ($('audio-lip-sync')) $('audio-lip-sync').checked = true;
+  audioLip.enabled = true;
+  const steps = info?.steps ?? 0;
+  const status = $('audio-status');
+  if (status) {
+    status.textContent = steps > 0 ? `${base} — lip-sync ready (${steps} steps)` : `${base} — loaded`;
+  }
+  updateRecordUi();
+}
+
+async function applyUrlJob() {
+  const job = readJobQuery();
+  if (!job.recording && !job.model && !job.audio) return;
+  if (job.recording) {
+    const name = sanitizeRawName(job.recording);
+    await refreshRawList(name);
+    if ($('raw-select')?.value !== name) throw new Error(`Recording not found: ${job.recording}`);
+    setRawStatus(`Selected ${name} from the link.`);
+  }
+  if (job.model) await selectModelFromQuery(job.model);
+  if (job.audio) await loadAudioFromUrl(job.audio);
+  if (!(job.recording && job.model && job.audio)) return;
+
+  setStatus('Link loaded. Starting tracking, model, and recording…', false);
+  await startTracking();
+  await loadModelFace();
+  if ($('record-with-audio')) $('record-with-audio').checked = true;
+  urlJobRecording = true;
+  await startRecordingWithOptions();
+  if (rawPlaybackVideo?.ended) {
+    await finishRecordedVideo();
+    return;
+  }
+  setStatus('<strong>Recording from link.</strong> The video URL appears when the take ends.', true);
 }
 
 function bindPlacementControls() {
@@ -2413,6 +2516,10 @@ function bootstrap() {
   bindRawControls();
   refreshPresetDropdown().catch(console.error);
   setRecordPanelUnlocked(false);
+  applyUrlJob().catch((err) => {
+    console.error(err);
+    setStatus(`Link setup failed: ${err.message}`, false);
+  });
 }
 
 if (document.readyState === 'loading') {

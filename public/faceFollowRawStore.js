@@ -50,6 +50,19 @@ export async function saveRawVideo(name, blob) {
   return data.name || safe;
 }
 
+export async function saveOutputVideo(blob) {
+  const ext = blob.type && blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const name = `output-${Date.now()}`;
+  const res = await fetch(`./api/assets/outputs?name=${encodeURIComponent(name)}&ext=${ext}`, {
+    method: 'POST',
+    headers: { 'X-Recording-Name': name },
+    body: blob,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = await res.json();
+  return data.url || `assets/outputs/${name}.${ext}`;
+}
+
 export async function deleteRawVideo(name) {
   const safe = sanitizeRawName(name);
   const res = await fetch(`./api/assets/recordings/${encodeURIComponent(safe)}`, {

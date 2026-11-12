@@ -25,6 +25,7 @@ const MODELS_DIR = path.join(ASSETS, 'models');
 const BACKGROUNDS_DIR = path.join(ASSETS, 'backgrounds');
 const DATA_DIR = path.join(ASSETS, 'data');
 const RECORDINGS_DIR = path.join(ASSETS, 'recordings');
+const OUTPUTS_DIR = path.join(ASSETS, 'outputs');
 const MODELS_INDEX = path.join(DATA_DIR, 'models.json');
 
 const DATA_ALLOW = new Set([
@@ -80,17 +81,30 @@ function sanitizeRawName(input) {
   return cleaned;
 }
 
-function recordingFile(name) {
+function storedMediaFile(dir, name, ext) {
   const safe = sanitizeRawName(name);
+  const extension = ext === 'mp4' ? '.mp4' : '.webm';
   if (!safe) return null;
-  const root = path.resolve(RECORDINGS_DIR);
-  const file = path.resolve(root, `${safe}.webm`);
-  if (file !== path.join(root, `${safe}.webm`)) return null;
-  return { safe, file };
+  const root = path.resolve(dir);
+  const file = path.resolve(root, `${safe}${extension}`);
+  if (file !== path.join(root, `${safe}${extension}`)) return null;
+  return {
+    safe,
+    file,
+    url: `assets/${path.basename(root)}/${safe}${extension}`,
+  };
+}
+
+function recordingFile(name) {
+  return storedMediaFile(RECORDINGS_DIR, name, 'webm');
+}
+
+function outputFile(name, ext) {
+  return storedMediaFile(OUTPUTS_DIR, name, ext === 'mp4' ? 'mp4' : 'webm');
 }
 
 async function writeRecording(req, filePath) {
-  await fsp.mkdir(RECORDINGS_DIR, { recursive: true });
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
   const buf = await readBody(req);
   if (!buf.length) {
     const err = new Error('Empty recording');
@@ -121,6 +135,7 @@ async function ensureDirs() {
   await fsp.mkdir(BACKGROUNDS_DIR, { recursive: true });
   await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.mkdir(RECORDINGS_DIR, { recursive: true });
+  await fsp.mkdir(OUTPUTS_DIR, { recursive: true });
   if (!fs.existsSync(MODELS_INDEX)) {
     await fsp.writeFile(
       MODELS_INDEX,
@@ -377,6 +392,18 @@ async function handleApi(req, res, url) {
     }
     await writeRecording(req, target.file);
     sendJson(res, 200, { name: target.safe });
+    return true;
+  }
+
+  if (pathname === '/api/assets/outputs' && req.method === 'POST') {
+    const ext = url.searchParams.get('ext') === 'mp4' ? 'mp4' : 'webm';
+    const target = outputFile(url.searchParams.get('name') || req.headers['x-recording-name'], ext);
+    if (!target) {
+      sendJson(res, 400, { error: 'Invalid output name' });
+      return true;
+    }
+    await writeRecording(req, target.file);
+    sendJson(res, 200, { name: target.safe, url: target.url });
     return true;
   }
 

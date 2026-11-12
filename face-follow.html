@@ -134,11 +134,12 @@
         background: #0a0e14;
         border: 1px solid #2a3544;
       }
-      #record-status, #audio-status, #raw-status, #source-hint {
+      #record-status, #audio-status, #raw-status, #source-hint, #output-url {
         font-size: 11px;
         color: #9aa8b8;
         margin: 4px 0;
       }
+      #output-url a { color: #6eb5ff; word-break: break-all; }
       #raw-panel {
         border-color: #3b82f6;
       }
@@ -278,7 +279,7 @@
         <select id="raw-select" aria-label="Face source">
           <option value="">Live camera</option>
         </select>
-        <p id="source-hint">Choose a saved recording to track without the live camera.</p>
+        <p id="source-hint">Choose a saved recording, or open a link: ?recording=name&amp;model=model-id&amp;audio=https://…</p>
         <p id="raw-status">Record a take, then pick it above.</p>
         <input type="text" id="raw-name" placeholder="Name this recording" maxlength="80" />
         <div class="btn-row">
@@ -342,6 +343,7 @@
           <button type="button" id="btn-rec-resume" class="secondary" disabled>Resume</button>
           <button type="button" id="btn-rec-stop" class="secondary" disabled>Stop &amp; save</button>
         </div>
+        <p id="output-url" hidden></p>
       </div>
 
       <div id="bg-panel" class="panel">
