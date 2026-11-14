@@ -133,6 +133,10 @@ export class AudioLipSync {
     this._engine?.onEnded(cb);
   }
 
+  setOnEnded(cb) {
+    this._engine?.setOnEnded(cb);
+  }
+
   _samplePhonemeFast(timeSec) {
     const timeline = this._phonemeTimeline;
     if (!timeline?.length) return null;

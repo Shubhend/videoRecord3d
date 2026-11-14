@@ -8,3 +8,5 @@ public/assets/backgrounds/*
 !public/assets/backgrounds/.gitkeep
 public/assets/recordings/*
 !public/assets/recordings/.gitkeep
+public/assets/outputs/*
+!public/assets/outputs/.gitkeep

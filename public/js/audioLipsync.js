@@ -235,6 +235,11 @@ export class AudioLipsync {
     this._onEndedCallbacks.push(cb);
   }
 
+  /** Replace any previous end listener. Pass null to clear. */
+  setOnEnded(cb) {
+    this._onEndedCallbacks = cb ? [cb] : [];
+  }
+
   /**
    * Sample the analyser and produce viseme weights.
    * Must be called every frame while audio is playing.

@@ -1185,7 +1185,8 @@ function paintRecordFrame() {
 
 async function startRecordingWithOptions() {
   if (!running || !faceRecorder) return;
-  const withAudio = $('record-with-audio')?.checked === true && audioLip?.hasAudio();
+  const withAudio = !!audioLip?.hasAudio();
+  if (withAudio && $('record-with-audio')) $('record-with-audio').checked = true;
   if (withAudio) {
     if ($('audio-lip-sync')) $('audio-lip-sync').checked = true;
     audioLip.enabled = true;
@@ -1196,6 +1197,15 @@ async function startRecordingWithOptions() {
     } catch (e) {
       console.warn('Audio play failed:', e);
     }
+    audioLip.setOnEnded(() => {
+      finishRecordedVideo().catch((err) => {
+        console.error(err);
+        const statusEl = $('record-status');
+        if (statusEl) statusEl.textContent = `Save failed: ${err.message}`;
+      });
+    });
+  } else {
+    audioLip?.setOnEnded(null);
   }
   renderer.render(scene, camera);
   paintRecordFrame();
@@ -1205,6 +1215,10 @@ async function startRecordingWithOptions() {
   }
   await faceRecorder.start(stream);
   updateRecordUi();
+  if (withAudio) {
+    const statusEl = $('record-status');
+    if (statusEl) statusEl.textContent = 'Record: recording — saves when audio ends';
+  }
 }
 
 function syncVideoFeed() {
