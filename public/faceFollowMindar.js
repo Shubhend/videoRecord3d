@@ -2148,11 +2148,24 @@ async function finishRecordedVideo() {
     faceRecorder.download(blob, `face-follow-${label}-${w}x${h}-${Date.now()}`);
     if (statusEl) statusEl.textContent = 'Saving video URL…';
     const url = await saveOutputVideo(blob);
+    const videoUrl = new URL(url.replace(/^\.\//, ''), document.baseURI).href;
     showOutputUrl(url);
+    let webhookNote = '';
+    if (readJobQuery().webhook) {
+      if (statusEl) statusEl.textContent = 'Notifying webhook…';
+      try {
+        await notifyWebhook(videoUrl);
+        webhookNote = ' Webhook sent.';
+      } catch (err) {
+        console.error(err);
+        webhookNote = ` Webhook failed: ${err.message}`;
+      }
+    }
     if (statusEl) {
-      statusEl.textContent = blob.type.includes('mp4')
+      const saved = blob.type.includes('mp4')
         ? `Saved as MP4 (${label} ${w}×${h})`
         : `Saved WebM (${label} ${w}×${h}) — MP4 transcode unavailable`;
+      statusEl.textContent = saved + webhookNote;
     }
   } finally {
     finishingOutput = false;
@@ -2165,7 +2178,41 @@ function readJobQuery() {
     recording: (q.get('recording') || '').trim(),
     model: (q.get('model') || '').trim(),
     audio: (q.get('audio') || '').trim(),
+    webhook: (q.get('webhook') || '').trim(),
   };
+}
+
+function webhookQueryParams(webhookUrl) {
+  const params = {};
+  if (!webhookUrl) return params;
+  const parsed = new URL(webhookUrl);
+  parsed.searchParams.forEach((value, key) => {
+    params[key] = value;
+  });
+  return params;
+}
+
+async function notifyWebhook(videoUrl) {
+  const job = readJobQuery();
+  if (!job.webhook) return;
+  const query = webhookQueryParams(job.webhook);
+  const data = {
+    ...query,
+    videoUrl,
+    model: $('model-select')?.value || job.model,
+    recording: $('raw-select')?.value || job.recording,
+    audio: job.audio,
+    webhookQuery: query,
+  };
+  const res = await fetch('./api/assets/webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: job.webhook, data }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Webhook failed (${res.status})`);
+  }
 }
 
 async function selectModelFromQuery(query) {

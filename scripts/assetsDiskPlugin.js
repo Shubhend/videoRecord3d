@@ -395,6 +395,40 @@ async function handleApi(req, res, url) {
     return true;
   }
 
+  if (pathname === '/api/assets/webhook' && req.method === 'POST') {
+    const buf = await readBody(req);
+    let body = {};
+    try {
+      body = JSON.parse(buf.toString('utf8') || '{}');
+    } catch {
+      sendJson(res, 400, { error: 'Invalid JSON' });
+      return true;
+    }
+    let target;
+    try {
+      target = new URL(String(body.url || ''));
+    } catch {
+      sendJson(res, 400, { error: 'Invalid webhook URL' });
+      return true;
+    }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      sendJson(res, 400, { error: 'Webhook must be http or https' });
+      return true;
+    }
+    const resp = await fetch(target.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body.data ?? {}),
+    });
+    const text = await resp.text();
+    sendJson(res, resp.ok ? 200 : 502, {
+      ok: resp.ok,
+      status: resp.status,
+      body: text.slice(0, 500),
+    });
+    return true;
+  }
+
   if (pathname === '/api/assets/outputs' && req.method === 'POST') {
     const ext = url.searchParams.get('ext') === 'mp4' ? 'mp4' : 'webm';
     const target = outputFile(url.searchParams.get('name') || req.headers['x-recording-name'], ext);
