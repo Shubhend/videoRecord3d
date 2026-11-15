@@ -2179,7 +2179,20 @@ function readJobQuery() {
     model: (q.get('model') || '').trim(),
     audio: (q.get('audio') || '').trim(),
     webhook: (q.get('webhook') || '').trim(),
+    device: (q.get('device') || '').trim(),
   };
+}
+
+function selectRecordDeviceFromQuery(query) {
+  const sel = $('record-device');
+  if (!sel || !query) return;
+  const needle = query.trim().toLowerCase();
+  const match = [...sel.options].find(
+    (opt) => opt.value.toLowerCase() === needle || opt.textContent.trim().toLowerCase() === needle
+  );
+  if (!match) throw new Error(`Export size not found: ${query}`);
+  sel.value = match.value;
+  applyDevicePreview();
 }
 
 function webhookQueryParams(webhookUrl) {
@@ -2202,6 +2215,7 @@ async function notifyWebhook(videoUrl) {
     model: $('model-select')?.value || job.model,
     recording: $('raw-select')?.value || job.recording,
     audio: job.audio,
+    device: getSelectedRecordDevice(),
     webhookQuery: query,
   };
   const res = await fetch('./api/assets/webhook', {
@@ -2249,7 +2263,8 @@ async function loadAudioFromUrl(url) {
 
 async function applyUrlJob() {
   const job = readJobQuery();
-  if (!job.recording && !job.model && !job.audio) return;
+  if (!job.recording && !job.model && !job.audio && !job.device) return;
+  if (job.device) selectRecordDeviceFromQuery(job.device);
   if (job.recording) {
     const name = sanitizeRawName(job.recording);
     await refreshRawList(name);
