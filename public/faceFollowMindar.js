@@ -2161,12 +2161,14 @@ async function finishRecordedVideo() {
         webhookNote = ` Webhook failed: ${err.message}`;
       }
     }
-    if (statusEl) {
-      const saved = blob.type.includes('mp4')
-        ? `Saved as MP4 (${label} ${w}×${h})`
-        : `Saved WebM (${label} ${w}×${h}) — MP4 transcode unavailable`;
-      statusEl.textContent = saved + webhookNote;
-    }
+    const saved = blob.type.includes('mp4')
+      ? `Saved as MP4 (${label} ${w}×${h})`
+      : `Saved WebM (${label} ${w}×${h}) — MP4 transcode unavailable`;
+    if (statusEl) statusEl.textContent = saved + webhookNote;
+    await stopAll();
+    showOutputUrl(url);
+    if (statusEl) statusEl.textContent = saved + webhookNote;
+    setStatus('<strong>Stopped.</strong> Video URL is ready.', true);
   } finally {
     finishingOutput = false;
   }
