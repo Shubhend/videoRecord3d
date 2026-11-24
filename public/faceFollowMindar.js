@@ -2263,6 +2263,28 @@ async function loadAudioFromUrl(url) {
   updateRecordUi();
 }
 
+/** Hold the source frame so the avatar can finish hitching before the MP4 starts. */
+async function settleModelBeforeRecording() {
+  const video = rawPlaybackVideo;
+  if (video && !video.ended) video.pause();
+  const waitMs = 5000;
+  const stepMs = 1000;
+  for (let left = waitMs / stepMs; left > 0; left -= 1) {
+    setStatus(
+      `Model loaded. Recording starts in ${left}s so the model can settle…`,
+      false
+    );
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+  if (video && video === rawPlaybackVideo && !video.ended) {
+    try {
+      await video.play();
+    } catch {
+      /* last frame stays; recording still starts */
+    }
+  }
+}
+
 async function applyUrlJob() {
   const job = readJobQuery();
   if (!job.recording && !job.model && !job.audio && !job.device) return;
@@ -2280,6 +2302,7 @@ async function applyUrlJob() {
   setStatus('Link loaded. Starting tracking, model, and recording…', false);
   await startTracking();
   await loadModelFace();
+  if (modelLoaded && !rawPlaybackVideo?.ended) await settleModelBeforeRecording();
   if ($('record-with-audio')) $('record-with-audio').checked = true;
   urlJobRecording = true;
   await startRecordingWithOptions();
